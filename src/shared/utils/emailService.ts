@@ -54,6 +54,57 @@ export const sendPasswordChangedEmail = async (email: string) => {
   await transporter.sendMail(mailOptions);
 };
 
+export const sendPasswordResetOTPEmail = async (email: string, otp: string, firstName: string) => {
+  console.log("sendPasswordResetOTPEmail", { email, otp, firstName });
+
+  const mailOptions = {
+    from: process.env.FROM_USER,
+    to: email,
+    subject: 'Password Reset Code',
+    html: `
+      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #e0e0e0; border-radius: 10px;">
+        <div style="text-align: center; margin-bottom: 20px;">
+          <h1 style="color: #5379f4;">Password Reset</h1>
+        </div>
+        
+        <div style="padding: 20px; background-color: #f8f9fa; border-radius: 8px;">
+          <p style="font-size: 16px; color: #333;">Hello ${firstName || 'User'},</p>
+          
+          <p style="font-size: 16px; color: #333; margin-bottom: 20px;">
+            We received a request to reset your password. Use the verification code below to proceed:
+          </p>
+          
+          <div style="text-align: center; margin: 30px 0;">
+            <div style="font-size: 36px; font-weight: bold; letter-spacing: 8px; color: #5379f4; background-color: #e8f0fe; padding: 15px; border-radius: 8px; display: inline-block;">
+              ${otp}
+            </div>
+          </div>
+          
+          <p style="font-size: 14px; color: #666; margin-bottom: 10px;">
+            This code will expire in <strong>15 minutes</strong>.
+          </p>
+          
+          <p style="font-size: 14px; color: #666; margin-bottom: 20px;">
+            If you didn't request a password reset, please ignore this email or contact support.
+          </p>
+          
+          <hr style="border: none; border-top: 1px solid #e0e0e0; margin: 20px 0;">
+          
+          <p style="font-size: 12px; color: #999; text-align: center;">
+            For security reasons, never share this code with anyone.
+          </p>
+        </div>
+        
+        <div style="text-align: center; margin-top: 20px; color: #999; font-size: 12px;">
+          <p>&copy; ${new Date().getFullYear()} Instantly. All rights reserved.</p>
+        </div>
+      </div>
+    `
+  };
+  
+  await transporter.sendMail(mailOptions);
+};
+
 
 export const sendVerificationEmail = async (email: string, verificationToken: string) => {
   const verificationUrl = `${process.env.CLIENT_URL}/verify-email?token=${verificationToken}`;

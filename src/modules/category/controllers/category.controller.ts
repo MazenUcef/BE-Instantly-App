@@ -5,7 +5,7 @@ import { IAuthRequest } from "../../../shared/types";
 import { publishToQueue } from "../../../shared/config/rabbitmq";
 
 export const createCategory = async (req: IAuthRequest, res: Response) => {
-  const { name, description, icon } = req.body;
+  const { name, description, icon, jobs } = req.body;
 
   if (!name) {
     return res.status(400).json({ message: "Category name is required" });
@@ -23,15 +23,15 @@ export const createCategory = async (req: IAuthRequest, res: Response) => {
     name: name.trim(),
     description,
     icon,
+    jobs: Array.isArray(jobs) ? jobs : [],
   });
-
-  const token = req.header("Authorization")?.replace("Bearer ", "");
 
   await publishToQueue("CATEGORY_CREATED", {
     categoryId: category._id,
     name: category.name,
     description: category.description,
     icon: category.icon,
+    jobs: category.jobs,
   });
 
   return res.status(201).json({
@@ -39,7 +39,6 @@ export const createCategory = async (req: IAuthRequest, res: Response) => {
     data: category,
   });
 };
-
 
 export const getAllCategories = async (_req: Request, res: Response) => {
   const categories = await Category.find().sort({ createdAt: -1 });
@@ -49,7 +48,6 @@ export const getAllCategories = async (_req: Request, res: Response) => {
     data: categories,
   });
 };
-
 
 export const getCategoryById = async (req: Request, res: Response) => {
   const id = req.params.id as string;
@@ -69,10 +67,9 @@ export const getCategoryById = async (req: Request, res: Response) => {
   });
 };
 
-
 export const updateCategory = async (req: Request, res: Response) => {
   const id = req.params.id as string;
-  const { name, description, icon } = req.body;
+  const { name, description, icon, jobs } = req.body;
 
   if (!Types.ObjectId.isValid(id)) {
     return res.status(400).json({ message: "Invalid category ID" });
@@ -84,21 +81,17 @@ export const updateCategory = async (req: Request, res: Response) => {
     return res.status(404).json({ message: "Category not found" });
   }
 
-
   if (name && name.trim() !== category.name) {
-    const existingCategory = await Category.findOne({
-      name: name.trim(),
-    });
-
+    const existingCategory = await Category.findOne({ name: name.trim() });
     if (existingCategory) {
       return res.status(400).json({ message: "Category name already exists" });
     }
-
     category.name = name.trim();
   }
 
   if (description !== undefined) category.description = description;
   if (icon !== undefined) category.icon = icon;
+  if (Array.isArray(jobs)) category.jobs = jobs;
 
   await category.save();
 

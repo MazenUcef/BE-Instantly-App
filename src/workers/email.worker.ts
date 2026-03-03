@@ -1,5 +1,11 @@
 import { getChannel } from "../shared/config/rabbitmq";
-import { sendEmailOTP, sendPasswordChangedEmail, sendResetPasswordEmail, sendWelcomeEmail } from "../shared/utils/emailService";
+import {
+  sendEmailOTP,
+  sendPasswordChangedEmail,
+  sendPasswordResetOTPEmail,
+  sendResetPasswordEmail,
+  sendWelcomeEmail,
+} from "../shared/utils/emailService";
 
 export const startEmailWorker = async () => {
   const channel = getChannel();
@@ -18,6 +24,9 @@ export const startEmailWorker = async () => {
           break;
         case "reset_password_email":
           await sendResetPasswordEmail(to, data.token);
+          break;
+        case "password_reset_otp":
+          await sendPasswordResetOTPEmail(to, data.otp, data.firstName);
           break;
         case "password_changed_email":
           await sendPasswordChangedEmail(to);

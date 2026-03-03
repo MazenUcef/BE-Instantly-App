@@ -10,6 +10,10 @@ const CategorySchema = new Schema(
     },
     description: String,
     icon: String,
+    jobs: {
+      type: [String],
+      default: [],
+    },
   },
   { timestamps: true },
 );

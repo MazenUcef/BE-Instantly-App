@@ -32,12 +32,44 @@ export const register = async (req: Request, res: Response) => {
     });
 
     if (existingUser) {
-      throw new AppError("User already exists", 409);
+      if (existingUser.email === data.email) {
+        if (existingUser.isEmailVerified) {
+          throw new AppError("User already exists", 409);
+        }
+        
+
+        const emailOtp = generateOTP();
+        await saveEmailOTP(existingUser.email, emailOtp);
+
+        await publishToQueue("USER_REGISTERED", {
+          userId: existingUser._id.toString(),
+          email: existingUser.email,
+          firstName: existingUser.firstName,
+          otp: emailOtp,
+          isResend: true,
+        });
+
+
+        return res.status(200).json({ 
+          success: true, 
+          message: "This email is already registered but not verified. A new verification code has been sent to your email.",
+          requiresVerification: true,
+          email: existingUser.email
+        });
+      }
+      
+      if (existingUser.phoneNumber === data.phoneNumber) {
+        throw new AppError("Phone number already registered", 409);
+      }
     }
 
     if (data.role === "supplier") {
       if (!data.categoryId) {
         throw new AppError("Category is required for supplier", 400);
+      }
+
+      if (!data.jobTitle) {
+        throw new AppError("Job title is required for supplier", 400);
       }
 
       const category = await CategoryModel.findById(data.categoryId);
@@ -61,6 +93,7 @@ export const register = async (req: Request, res: Response) => {
       ...data,
       password: await hashPassword(data.password),
       categoryId: data.role === "supplier" ? data.categoryId : null,
+      jobTitle: data.role === "supplier" ? data.jobTitle : null,
       profilePicture: profilePictureUpload.secure_url,
       isEmailVerified: false,
       isPhoneVerified: true,
@@ -83,11 +116,17 @@ export const register = async (req: Request, res: Response) => {
       otp: emailOtp,
     });
 
-    console.log("✅ Message published successfully");
 
-    res.status(201).json({ success: true });
+    res.status(201).json({ 
+      success: true, 
+      message: "Registration successful. Please check your email for verification code.",
+      requiresVerification: true,
+      email: user.email
+    });
+    
   } catch (error: any) {
     res.status(error.statusCode || 500).json({
+      success: false,
       message: error.message,
     });
   }
@@ -171,7 +210,7 @@ export const login = async (req: Request, res: Response) => {
       });
 
       throw new AppError(
-        "Email not verified. A new verification code has been sent to your email.",
+        "Email not verified. we have been sent a new email.",
         403,
       );
     }
@@ -206,6 +245,7 @@ export const login = async (req: Request, res: Response) => {
       role: user.role,
       name: `${user.firstName} ${user.lastName}`,
       categoryId: user.categoryId,
+      jobTitle: user.jobTitle,
       sessionId,
     };
 
@@ -247,8 +287,35 @@ export const refreshToken = async (req: Request, res: Response) => {
     throw new AppError("Invalid refresh token", 401);
   }
 
-  const newAccessToken = generateToken(decoded);
-  res.json({ accessToken: newAccessToken });
+  const user = await UserModel.findById(decoded.userId);
+  if (!user) throw new AppError("User not found", 404);
+
+  const newSessionId = crypto.randomUUID();
+  const payload = {
+    userId: user._id.toString(),
+    role: user.role,
+    sessionId: newSessionId,
+    name: `${user.firstName} ${user.lastName}`,
+    jobTitle: user.jobTitle,
+    categoryId: user.categoryId,
+  };
+
+  const newAccessToken = generateToken(payload);
+  const newRefreshToken = generateRefreshToken(payload);
+
+  await redis.set(
+    `refresh:${decoded.userId}:${newSessionId}`,
+    newRefreshToken,
+    "EX",
+    7 * 24 * 60 * 60,
+  );
+
+  await redis.del(`refresh:${decoded.userId}:${decoded.sessionId}`);
+
+  res.json({
+    accessToken: newAccessToken,
+    refreshToken: newRefreshToken,
+  });
 };
 
 export const logout = async (req: any, res: Response) => {
@@ -260,55 +327,180 @@ export const logout = async (req: any, res: Response) => {
   res.json({ success: true });
 };
 
+
 export const forgotPassword = async (req: Request, res: Response) => {
-  const { email } = req.body;
+  try {
+    const { email } = req.body;
 
-  const user = await UserModel.findOne({ email });
-  if (!user) return res.json({ success: true });
+    const user = await UserModel.findOne({ email });
+    if (!user) {
+      return res.json({ 
+        success: true, 
+        message: "If your email is registered, a password reset code will be sent" 
+      });
+    }
 
-  const resetToken = randomBytes(32).toString("hex");
-  const hashedToken = createHash("sha256").update(resetToken).digest("hex");
+    const rateLimitKey = `forgot:password:${email}`;
+    const requests = Number(await redis.get(rateLimitKey)) || 0;
+    
+    if (requests >= 3) {
+      throw new AppError("Too many password reset attempts. Please try again later.", 429);
+    }
 
-  await redis.set(`reset:${hashedToken}`, user._id.toString(), "EX", 3600);
-  await publishToQueue("email_jobs", {
-    type: "reset_password_email",
-    to: email,
-    data: {
-      token: resetToken,
-    },
-  });
+    const resetOTP = generateOTP();
+    
+    const otpKey = `reset:password:otp:${email}`;
+    await redis.set(
+      otpKey, 
+      JSON.stringify({
+        otp: resetOTP,
+        userId: user._id.toString(),
+        attempts: 0
+      }), 
+      "EX", 
+      900
+    );
 
-  res.json({ success: true });
+    await redis.incr(rateLimitKey);
+    await redis.expire(rateLimitKey, 3600);
+
+    await publishToQueue("email_jobs", {
+      type: "password_reset_otp",
+      to: email,
+      data: {
+        otp: resetOTP,
+        firstName: user.firstName,
+      },
+    });
+
+    console.log("📤 Password reset OTP sent to:", { email, otp: resetOTP });
+
+    res.json({ 
+      success: true, 
+      message: "Password reset code has been sent to your email",
+      email: email
+    });
+
+  } catch (error: any) {
+    console.error("Error in forgotPassword:", error);
+    res.status(error.statusCode || 500).json({
+      success: false,
+      message: error.message || "Failed to process password reset request",
+    });
+  }
 };
 
+export const verifyResetOTP = async (req: Request, res: Response) => {
+  try {
+    const { email, otp } = req.body;
+
+    if (!email || !otp) {
+      throw new AppError("Email and OTP are required", 400);
+    }
+
+    const otpKey = `reset:password:otp:${email}`;
+    const otpDataStr = await redis.get(otpKey);
+
+    if (!otpDataStr) {
+      throw new AppError("OTP has expired or is invalid. Please request a new one.", 400);
+    }
+
+    const otpData = JSON.parse(otpDataStr);
+
+    if (otpData.attempts >= 5) {
+      await redis.del(otpKey);
+      throw new AppError("Too many invalid attempts. Please request a new OTP.", 429);
+    }
+
+    if (otpData.otp !== otp) {
+      otpData.attempts += 1;
+      await redis.set(otpKey, JSON.stringify(otpData), "EX", 900);
+      
+      throw new AppError("Invalid OTP code", 400);
+    }
+
+    const resetToken = randomBytes(32).toString("hex");
+    const hashedToken = createHash("sha256").update(resetToken).digest("hex");
+
+    await redis.set(
+      `reset:password:token:${hashedToken}`,
+      otpData.userId,
+      "EX",
+      600
+    );
+
+    await redis.del(otpKey);
+
+    res.json({
+      success: true,
+      message: "OTP verified successfully",
+      token: resetToken
+    });
+
+  } catch (error: any) {
+    console.error("Error in verifyResetOTP:", error);
+    res.status(error.statusCode || 500).json({
+      success: false,
+      message: error.message || "Failed to verify OTP",
+    });
+  }
+};
+
+
 export const resetPassword = async (req: Request, res: Response) => {
-  const { token, password } = req.body;
+  try {
+    const { token, password } = req.body;
 
-  const hashedToken = createHash("sha256").update(token).digest("hex");
-  const userId = await redis.get(`reset:${hashedToken}`);
+    if (!token || !password) {
+      throw new AppError("Token and new password are required", 400);
+    }
 
-  if (!userId) throw new AppError("Invalid or expired token", 400);
+    const hashedToken = createHash("sha256").update(token).digest("hex");
+    const userId = await redis.get(`reset:password:token:${hashedToken}`);
 
-  await UserModel.findByIdAndUpdate(userId, {
-    password: await hashPassword(password),
-  });
+    if (!userId) {
+      throw new AppError("Invalid or expired reset token", 400);
+    }
 
-  await redis.del(`reset:${hashedToken}`);
-  const updatedUser = await UserModel.findById(userId);
+    const user = await UserModel.findByIdAndUpdate(
+      userId,
+      { password: await hashPassword(password) },
+      { new: true }
+    );
 
-  await publishToQueue("email_jobs", {
-    type: "password_changed_email",
-    to: updatedUser!.email,
-    data: {},
-  });
-  await publishNotification({
-    userId: userId,
-    type: "password_changed",
-    title: "Password Changed",
-    message: "Your password was successfully updated.",
-  });
+    if (!user) {
+      throw new AppError("User not found", 404);
+    }
 
-  res.json({ success: true });
+    await redis.del(`reset:password:token:${hashedToken}`);
+
+    await publishToQueue("email_jobs", {
+      type: "password_changed_email",
+      to: user.email,
+      data: {
+        firstName: user.firstName,
+      },
+    });
+
+    await publishNotification({
+      userId: userId,
+      type: "password_changed",
+      title: "Password Changed",
+      message: "Your password was successfully updated.",
+    });
+
+    res.json({
+      success: true,
+      message: "Password has been reset successfully"
+    });
+
+  } catch (error: any) {
+    console.error("Error in resetPassword:", error);
+    res.status(error.statusCode || 500).json({
+      success: false,
+      message: error.message || "Failed to reset password",
+    });
+  }
 };
 
 export const switchRole = async (req: any, res: Response) => {
@@ -338,7 +530,9 @@ export const switchRole = async (req: any, res: Response) => {
     }
     console.log(user.categoryId);
 
-    const category = await CategoryModel.findById(new mongoose.Types.ObjectId(user.categoryId.toString()));
+    const category = await CategoryModel.findById(
+      new mongoose.Types.ObjectId(user.categoryId.toString()),
+    );
     console.log("category", category);
     if (!category) {
       throw new AppError("Invalid category", 400);
@@ -359,6 +553,7 @@ export const switchRole = async (req: any, res: Response) => {
     role: user.role,
     name: `${user.firstName} ${user.lastName}`,
     categoryId: user.categoryId,
+    jobTitle: user.jobTitle,
     sessionId: newSessionId,
   };
 
@@ -507,6 +702,7 @@ export const biometricLogin = async (req: Request, res: Response) => {
     role: user.role,
     name: `${user.firstName} ${user.lastName}`,
     categoryId: user.categoryId,
+    jobTitle: user.jobTitle,
     sessionId,
   };
   const accessToken = generateToken(payload);
@@ -569,4 +765,68 @@ export const updateUserRating = async (req: Request, res: Response) => {
 
   await user.save();
   res.json({ message: "User rating updated" });
+};
+
+
+export const resendVerificationEmail = async (req: Request, res: Response) => {
+  try {
+    const { email } = req.body;
+
+    if (!email) {
+      throw new AppError("Email is required", 400);
+    }
+
+    const user = await UserModel.findOne({ email });
+    if (!user) {
+      return res.json({ 
+        success: true, 
+        message: "If your email is registered, a verification code will be sent" 
+      });
+    }
+
+    if (user.isEmailVerified) {
+      throw new AppError("Email is already verified", 400);
+    }
+
+    const rateLimitKey = `resend:otp:${email}`;
+    const requests = Number(await redis.get(rateLimitKey)) || 0;
+    
+    if (requests >= 3) {
+      throw new AppError("Too many resend attempts. Please try again later.", 429);
+    }
+
+    const emailOtp = generateOTP();
+    await saveEmailOTP(user.email, emailOtp);
+
+    await redis.incr(rateLimitKey);
+    await redis.expire(rateLimitKey, 3600);
+
+    console.log("📤 Resending verification email to:", {
+      userId: user._id.toString(),
+      email: user.email,
+      otp: emailOtp,
+    });
+
+    await publishToQueue("USER_REGISTERED", {
+      userId: user._id.toString(),
+      email: user.email,
+      firstName: user.firstName,
+      otp: emailOtp,
+      isResend: true,
+    });
+
+    console.log("✅ Resend verification email published successfully");
+
+    res.json({ 
+      success: true, 
+      message: "Verification email has been resent successfully" 
+    });
+
+  } catch (error: any) {
+    console.error("Error in resendVerificationEmail:", error);
+    res.status(error.statusCode || 500).json({
+      success: false,
+      message: error.message || "Failed to resend verification email",
+    });
+  }
 };

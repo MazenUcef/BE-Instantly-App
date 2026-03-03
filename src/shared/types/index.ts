@@ -20,6 +20,7 @@ export interface IUser {
   address: string;
   categoryId: Types.ObjectId;
   nationalId: string;
+  jobTitle?: string | null;
   phoneNumber: string;
   nationalIdPhotoFront?: string;
   nationalIdPhotoBack?: string;

@@ -13,8 +13,10 @@ import {
   updateUser,
   deleteUser,
   updateUserRating,
+  resendVerificationEmail,
+  verifyResetOTP,
 } from "../controllers/auth.controller";
-import { validateForgotPassword, validateLogin, validateRefreshToken, validateRegister, validateResetPassword, validateVerifyEmailOTP } from "../../../shared/middlewares/validate";
+import { validateForgotPassword, validateLogin, validateRefreshToken, validateRegister, validateResendVerification, validateResetPassword, validateVerifyEmailOTP, validateVerifyResetOTP } from "../../../shared/middlewares/validate";
 import { authenticate } from "../../../shared/middlewares/auth";
 
 const router = Router();
@@ -25,6 +27,8 @@ router.post("/register", validateRegister, register);
 
 router.post("/verify-email", validateVerifyEmailOTP, verifyEmailOTP);
 
+router.post("/resend-verification", validateResendVerification, resendVerificationEmail);
+
 router.post("/login", validateLogin, login);
 
 router.post("/refresh", validateRefreshToken, refreshToken);
@@ -32,7 +36,7 @@ router.post("/refresh", validateRefreshToken, refreshToken);
 router.post("/logout", authenticate, logout);
 
 router.post("/forgot-password", validateForgotPassword, forgotPassword);
-
+router.post("/verify-reset-otp", validateVerifyResetOTP, verifyResetOTP);
 router.post("/reset-password", validateResetPassword, resetPassword);
 
 router.post("/switch-role", authenticate, switchRole);

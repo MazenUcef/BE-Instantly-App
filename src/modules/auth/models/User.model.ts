@@ -13,7 +13,7 @@ const UserSchema = new Schema<IUser>(
 
     role: {
       type: String,
-      enum: ["customer", "supplier"],
+      enum: ["customer", "supplier", "admin"],
       default: "customer",
     },
 
@@ -52,6 +52,12 @@ const UserSchema = new Schema<IUser>(
     totalReviews: {
       type: Number,
       default: 0,
+    },
+
+    jobTitle: {
+      type: String,
+      required: false,
+      default: null,
     },
 
     reviews: [
