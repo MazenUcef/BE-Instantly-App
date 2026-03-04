@@ -6,6 +6,41 @@ import UserModel from "../../auth/models/User.model";
 import { getIO } from "../../../shared/config/socket";
 import { publishNotification } from "../../notification/notification.publisher";
 
+
+
+const populateSessionData = async (session: any) => {
+  if (!session) return null;
+  
+  const sessionObj = session.toObject ? session.toObject() : session;
+  
+  try {
+    const [order, offer, customer, supplier] = await Promise.all([
+      Order.findById(session.orderId)
+        .populate('categoryId', 'name icon')
+        .populate('governmentId', 'name nameAr')
+        .lean(),
+      Offer.findById(session.offerId).lean(),
+      UserModel.findById(session.customerId)
+        .select("-password -refreshToken -biometrics")
+        .lean(),
+      UserModel.findById(session.supplierId)
+        .select("-password -refreshToken -biometrics")
+        .lean(),
+    ]);
+
+    return {
+      ...sessionObj,
+      order: order || null,
+      offer: offer || null,
+      customer: customer || null,
+      supplier: supplier || null,
+    };
+  } catch (error) {
+    console.error("Error populating session data:", error);
+    return sessionObj;
+  }
+};
+
 export const createSession = async (req: Request, res: Response) => {
   try {
     const { orderId, offerId, customerId, supplierId } = req.body;
@@ -29,7 +64,7 @@ export const createSession = async (req: Request, res: Response) => {
       offerId,
       customerId,
       supplierId,
-      status: "accepted",
+      status: "started",
     });
 
     await publishNotification({
@@ -62,9 +97,11 @@ export const getSessionById = async (req: Request, res: Response) => {
     if (!session) {
       return res.status(404).json({ message: "Session not found" });
     }
+    const populatedSession = await populateSessionData(session);
 
-    res.json(session);
+    res.json(populatedSession);
   } catch (error) {
+    console.error("Get session by ID error:", error);
     res.status(500).json({ message: "Failed to fetch session" });
   }
 };
@@ -77,28 +114,21 @@ export const getActiveSessionForUser = async (req: Request, res: Response) => {
       $or: [{ customerId: userId }, { supplierId: userId }],
       status: { $nin: ["completed", "cancelled"] },
     });
+    console.log("session" , session);
+    
 
     if (!session) {
       return res.json({ active: false });
     }
 
-    const [order, customer, supplier] = await Promise.all([
-      Order.findById(session.orderId),
-      UserModel.findById(session.customerId).select("-password"),
-      UserModel.findById(session.supplierId).select("-password"),
-    ]);
+    const populatedSession = await populateSessionData(session);
 
     res.json({
       active: true,
-      session: {
-        ...session.toObject(),
-        order,
-        customer,
-        supplier,
-      },
+      session: populatedSession,
     });
   } catch (error) {
-    console.error(error);
+    console.error("Get active session error:", error);
     res.status(500).json({ message: "Failed to fetch active session" });
   }
 };
@@ -129,11 +159,14 @@ export const updateSessionStatus = async (req: any, res: Response) => {
       return res.status(404).json({ message: "Session not found" });
     }
 
+    const populatedSession = await populateSessionData(session);
+
     const io = getIO();
 
     io.to(`user_${session.customerId}`).emit("supplier_status_update", {
       sessionId: session._id,
       status,
+      session: populatedSession,
     });
 
     await publishNotification({
@@ -146,12 +179,13 @@ export const updateSessionStatus = async (req: any, res: Response) => {
         orderId: session.orderId,
         supplierId: session.supplierId,
         status,
+        session: populatedSession,
       },
     });
 
     res.json({
       message: `Session status updated to "${status}"`,
-      session,
+      session: populatedSession,
     });
   } catch (error) {
     console.error("Update session status error:", error);
@@ -237,8 +271,11 @@ export const getSessionByOrder = async (req: Request, res: Response) => {
       return res.status(404).json({ message: "Session not found" });
     }
 
-    res.json(session);
+    const populatedSession = await populateSessionData(session);
+
+    res.json(populatedSession);
   } catch (error) {
+    console.error("Get session by order error:", error);
     res.status(500).json({ message: "Failed to fetch session" });
   }
 };

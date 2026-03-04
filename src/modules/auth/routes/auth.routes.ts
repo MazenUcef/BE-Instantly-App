@@ -12,7 +12,6 @@ import {
   getUserById,
   updateUser,
   deleteUser,
-  updateUserRating,
   resendVerificationEmail,
   verifyResetOTP,
   registerDevice,
@@ -39,7 +38,9 @@ router.post("/refresh", validateRefreshToken, refreshToken);
 router.post("/logout", authenticate, logout);
 
 router.post("/forgot-password", validateForgotPassword, forgotPassword);
+
 router.post("/verify-reset-otp", validateVerifyResetOTP, verifyResetOTP);
+
 router.post("/reset-password", validateResetPassword, resetPassword);
 
 router.post("/switch-role", authenticate, switchRole);
@@ -52,10 +53,10 @@ router.put("/:id", authenticate, updateUser);
 
 router.delete("/:id", authenticate, deleteUser);
 
-router.patch("/:id/update-rating", updateUserRating);
-
 router.post("/devices/register", authenticate, registerDevice);
+
 router.post("/devices/login", biometricLogin);
+
 router.delete("/devices/remove", authenticate, removeDevice);
 
 export default router;

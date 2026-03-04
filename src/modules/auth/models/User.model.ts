@@ -23,6 +23,8 @@ const UserSchema = new Schema<IUser>(
       default: null,
     },
 
+    address:{type: String, required: true },
+
     governmentIds: [{
       type: Schema.Types.ObjectId,
       ref: "Government",
@@ -79,8 +81,6 @@ const UserSchema = new Schema<IUser>(
   { timestamps: true },
 );
 
-UserSchema.index({ email: 1 }, { unique: true });
-UserSchema.index({ phoneNumber: 1 }, { unique: true });
 UserSchema.index({ governmentIds: 1 });
 
 export default mongoose.model<IUser>("User", UserSchema);

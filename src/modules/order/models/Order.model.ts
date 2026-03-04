@@ -3,14 +3,15 @@ import mongoose, { Schema, Document } from "mongoose";
 export interface IOrder extends Document {
   customerId: string;
   customerName: string;
-  categoryId: string;
+  categoryId: mongoose.Types.ObjectId;
+  governmentId: mongoose.Types.ObjectId;
+  jobTitle: string;
   address: string;
   description: string;
   requestedPrice: number;
   status: "pending" | "in_progress" | "completed";
   finalPrice?: number;
   customerReviewed: boolean;
-  governmentId: string;
   supplierReviewed: boolean;
   timeToStart: Date;
 }
@@ -19,10 +20,20 @@ const OrderSchema = new Schema<IOrder>(
   {
     customerId: { type: String, required: true },
     customerName: { type: String, required: true },
-    categoryId: { type: String, required: true },
+
+    categoryId: { 
+      type: Schema.Types.ObjectId, 
+      ref: "Category",
+      required: true 
+    },
+    governmentId: { 
+      type: Schema.Types.ObjectId, 
+      ref: "Government",
+      required: true 
+    },
+    jobTitle: { type: String, required: true },
     address: { type: String, required: true },
     description: { type: String, required: true },
-    governmentId: { type: String, required: true },
     requestedPrice: {
       type: Number,
       required: true,
@@ -41,9 +52,10 @@ const OrderSchema = new Schema<IOrder>(
     customerReviewed: { type: Boolean, default: false },
     supplierReviewed: { type: Boolean, default: false },
   },
-  { timestamps: true },
+  { timestamps: true }
 );
 
 OrderSchema.index({ customerId: 1, status: 1 });
+OrderSchema.index({ categoryId: 1, governmentId: 1 });
 
 export default mongoose.model<IOrder>("Order", OrderSchema);

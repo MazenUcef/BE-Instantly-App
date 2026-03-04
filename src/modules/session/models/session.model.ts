@@ -7,7 +7,7 @@ export interface IJobSession extends Document {
   supplierId: Types.ObjectId;
 
   status:
-    | "accepted"
+    | "started"
     | "on_the_way"
     | "arrived"
     | "work_started"
@@ -30,7 +30,7 @@ const JobSessionSchema = new Schema<IJobSession>(
     status: {
       type: String,
       enum: [
-        "accepted",
+        "started",
         "on_the_way",
         "arrived",
         "work_started",
@@ -38,7 +38,7 @@ const JobSessionSchema = new Schema<IJobSession>(
         "cancelled",
         "done",
       ],
-      default: "accepted",
+      default: "started",
     },
   },
   { timestamps: true },

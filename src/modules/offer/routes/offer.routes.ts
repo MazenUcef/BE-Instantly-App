@@ -1,28 +1,44 @@
 import { Router } from "express";
-import { authenticate, authorizeCustomer, authorizeSupplier } from "../middlewares/auth";
 import {
   createOffer,
   acceptOffer,
   rejectOffer,
   getOffersByOrder,
-  checkActiveOffer,
-  rejectOffersByOrder,
-  acceptOrderDirect
+  acceptOrderDirect,
+  deleteOffer,
+  getAcceptedOfferHistory,
 } from "../controllers/offer.controller";
+import { authenticate, authorize } from "../../../shared/middlewares/auth";
 
 const router = Router();
 
-router.post("/", authenticate, authorizeSupplier, createOffer);
+router.post("/", authenticate, authorize("supplier"), createOffer);
 
-router.put("/accept/:id", authenticate, authorizeCustomer, acceptOffer);
-router.put("/reject/:id", authenticate, authorizeCustomer, rejectOffer);
+router.put("/accept/:id", authenticate, authorize("customer"), acceptOffer);
+
+router.put("/reject/:id", authenticate, authorize("customer"), rejectOffer);
 
 router.get("/order/:orderId", authenticate, getOffersByOrder);
 
-router.get("/check-active/:supplierId", checkActiveOffer);
+router.get(
+  "/supplier/history",
+  authenticate,
+  authorize("supplier"),
+  getAcceptedOfferHistory
+);
 
-router.put("/reject-by-order/:orderId", rejectOffersByOrder);
+router.delete(
+  "/:id",
+  authenticate,
+  authorize("supplier"),
+  deleteOffer
+);
 
-router.post("/accept-order-direct/:orderId", authenticate, authorizeSupplier, acceptOrderDirect);
+router.post(
+  "/accept-order-direct/:orderId",
+  authenticate,
+  authorize("supplier"),
+  acceptOrderDirect,
+);
 
 export default router;

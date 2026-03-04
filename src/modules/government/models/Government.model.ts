@@ -40,7 +40,6 @@ const GovernmentSchema = new Schema<IGovernment>(
   { timestamps: true }
 );
 
-GovernmentSchema.index({ name: 1 });
 GovernmentSchema.index({ isActive: 1 });
 
 export default mongoose.model<IGovernment>("Government", GovernmentSchema);

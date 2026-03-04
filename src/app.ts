@@ -9,6 +9,13 @@ import connectDB from './shared/config/database';
 import { initSocket } from './shared/config/socket';
 import authRoutes from './modules/auth/routes/auth.routes';
 import categoryRoutes from './modules/category/routes/category.routes';
+import chatRoutes from './modules/chat/routes/chat.routes';
+import governmentRoutes from './modules/government/routes/Government.routes';
+import notificationRoutes from './modules/notification/routes/notifications.routes';
+import offerRoutes from './modules/offer/routes/offer.routes';
+import orderRoutes from './modules/order/routes/order.routes';
+import reviewRoutes from './modules/review/routes/review.routes';
+import sessionRoutes from './modules/session/routes/session.routes';
 
 dotenv.config();
 
@@ -48,6 +55,13 @@ app.get('/health', (req, res) => {
 
 app.use('/api/auth',authRoutes)
 app.use('/api/categories',categoryRoutes)
+app.use("/api/governments", governmentRoutes);
+app.use("/api/chat", chatRoutes);
+app.use("/api/notifications", notificationRoutes);
+app.use("/api/offers", offerRoutes);
+app.use("/api/orders", orderRoutes);
+app.use("/api/reviews", reviewRoutes);
+app.use("/api/sessions", sessionRoutes);
 
 app.use((err: any, req: any, res: any, next: any) => {
   if (res.headersSent) return next(err);

@@ -76,25 +76,3 @@ export const markAllAsRead = async (req: IAuthRequest, res: Response) => {
   }
 };
 
-export const broadcastNotification = async (
-  req: IAuthRequest,
-  res: Response,
-) => {
-  try {
-    const { type, title, message, data } = req.body;
-
-    const io = getIO();
-
-    io.emit("new_notification", {
-      type,
-      title,
-      message,
-      data,
-      createdAt: new Date(),
-    });
-
-    res.json({ message: "Broadcast sent successfully" });
-  } catch (error) {
-    res.status(500).json({ message: "Failed to broadcast" });
-  }
-};

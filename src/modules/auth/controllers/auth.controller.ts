@@ -21,6 +21,7 @@ import {
 import { publishNotification } from "../../notification/notification.publisher";
 import CategoryModel from "../../category/models/Category.model";
 import { publishToQueue } from "../../../shared/config/rabbitmq";
+import GovernmentModel from "../../government/models/Government.model";
 
 
 
@@ -63,6 +64,10 @@ export const register = async (req: Request, res: Response) => {
       }
     }
 
+    if (!data.address) {
+      throw new AppError("Address is required", 400);
+    }
+
     if (data.role === "supplier") {
       if (!data.categoryId) {
         throw new AppError("Category is required for supplier", 400);
@@ -73,6 +78,21 @@ export const register = async (req: Request, res: Response) => {
           "At least one job title is required for supplier",
           400,
         );
+      }
+
+      if (!Array.isArray(data.governmentIds) || data.governmentIds.length === 0) {
+        throw new AppError(
+          "At least one government/service area is required for supplier",
+          400,
+        );
+      }
+
+      const governments = await GovernmentModel.find({
+        _id: { $in: data.governmentIds }
+      });
+      
+      if (governments.length !== data.governmentIds.length) {
+        throw new AppError("One or more governments are invalid", 400);
       }
 
       const category = await CategoryModel.findById(data.categoryId);
@@ -97,6 +117,7 @@ export const register = async (req: Request, res: Response) => {
       password: await hashPassword(data.password),
       categoryId: data.role === "supplier" ? data.categoryId : null,
       jobTitles: data.role === "supplier" ? data.jobTitles : [],
+      governmentIds: data.role === "supplier" ? data.governmentIds : [],
       profilePicture: profilePictureUpload.secure_url,
       isEmailVerified: false,
       isPhoneVerified: true,
@@ -247,7 +268,7 @@ export const login = async (req: Request, res: Response) => {
       role: user.role,
       name: `${user.firstName} ${user.lastName}`,
       categoryId: user.categoryId,
-      jobTitles: user.jobTitles,
+      governmentIds: user.governmentIds,
       sessionId,
     };
 
@@ -262,13 +283,15 @@ export const login = async (req: Request, res: Response) => {
     );
 
     const userObj = user.toObject();
+    const categoryDataWithoutJobs = categoryData?.toObject();
     const { password: _, ...safeUser } = userObj;
+    const { jobs, ...category } = categoryDataWithoutJobs || { jobs: [] };
 
     res.json({
       accessToken,
       refreshToken,
       user: safeUser,
-      categoryData,
+      category,
     });
   } catch (error: any) {
     res.status(error.statusCode || 500).json({
@@ -298,7 +321,7 @@ export const refreshToken = async (req: Request, res: Response) => {
     role: user.role,
     sessionId: newSessionId,
     name: `${user.firstName} ${user.lastName}`,
-    jobTitles: user.jobTitles,
+    governmentIds: user.governmentIds,
     categoryId: user.categoryId,
   };
 
@@ -577,8 +600,12 @@ export const resendVerificationEmail = async (req: Request, res: Response) => {
 };
 
 export const switchRole = async (req: any, res: Response) => {
+  console.log("switchRole - req.user:", req.user);
+    console.log("switchRole - req.body:", req.body);
+    console.log("switchRole - req.headers.content-type:", req.headers['content-type']);
   const { userId, role, sessionId } = req.user;
-  const { targetRole, categoryId, jobs } = req.body;
+  const { targetRole, categoryId, jobs, governmentIds } = req.body;
+  console.log("req.body", req.body);
 
   if (!["customer", "supplier"].includes(targetRole)) {
     throw new AppError("Invalid target role", 400);
@@ -611,12 +638,28 @@ export const switchRole = async (req: any, res: Response) => {
 
     if (!user.jobTitles || user.jobTitles.length === 0) {
       if (!Array.isArray(jobs) || jobs.length === 0) {
-        throw new AppError("At least one job is required for supplier", 400);
+        throw new AppError("At least one job title is required for supplier", 400);
       }
       user.jobTitles = jobs;
     }
-  } else {
-    user.jobTitles = [];
+
+    if (!user.governmentIds || user.governmentIds.length === 0) {
+      if (!Array.isArray(governmentIds) || governmentIds.length === 0) {
+        throw new AppError(
+          "At least one government/service area is required for supplier",
+          400,
+        );
+      }
+      const governments = await GovernmentModel.find({
+        _id: { $in: governmentIds }
+      });
+      
+      if (governments.length !== governmentIds.length) {
+        throw new AppError("One or more governments are invalid", 400);
+      }
+
+      user.governmentIds = governmentIds;
+    }
   }
 
   user.role = targetRole;
@@ -630,7 +673,7 @@ export const switchRole = async (req: any, res: Response) => {
     role: user.role,
     name: `${user.firstName} ${user.lastName}`,
     categoryId: user.categoryId,
-    jobTitles: user.jobTitles,
+    governmentIds: user.governmentIds,
     sessionId: newSessionId,
   };
 
@@ -647,11 +690,23 @@ export const switchRole = async (req: any, res: Response) => {
   const userObj = user.toObject();
   const { password: _, ...safeUser } = userObj;
 
+  if (targetRole === "supplier" && categoryData) {
+    const categoryObj = categoryData.toObject();
+    const { jobs: _, ...categoryWithoutJobs } = categoryObj;
+    categoryData = categoryWithoutJobs;
+  }
+
   await publishNotification({
     userId: userId,
     type: "role_switched",
     title: "Role Updated",
     message: `Your account role is now ${targetRole}.`,
+    data: {
+      targetRole,
+      categoryId: user.categoryId,
+      governmentIds: user.governmentIds,
+      jobTitles: user.jobTitles,
+    },
   });
 
   res.json({
@@ -659,7 +714,7 @@ export const switchRole = async (req: any, res: Response) => {
     accessToken,
     refreshToken,
     user: safeUser,
-    categoryData,
+    categoryData: targetRole === "supplier" ? categoryData : null,
   });
 };
 
@@ -727,32 +782,6 @@ export const deleteUser = async (req: Request, res: Response) => {
   res.status(200).json({ message: "User deleted successfully" });
 };
 
-export const updateUserRating = async (req: Request, res: Response) => {
-  const { averageRating, totalReviews, review } = req.body;
-  console.log("revewwwwwwwwww", review);
-
-  const user = await UserModel.findById(req.params.id);
-  if (!user) return res.status(404).json({ message: "User not found" });
-
-  const reviewer = await UserModel.findById(review.reviewerId);
-
-  user.averageRating = averageRating;
-  user.totalReviews = totalReviews;
-
-  user?.reviews?.push({
-    reviewerId: review.reviewerId,
-    reviewerName: reviewer
-      ? `${reviewer.firstName} ${reviewer.lastName}`
-      : "Unknown",
-    rating: review.rating,
-    comment: review.comment,
-    createdAt: review.createdAt,
-  });
-
-  await user.save();
-  res.json({ message: "User rating updated" });
-};
-
 export const registerDevice = async (req: any, res: Response) => {
   const { deviceId, type, passcode } = req.body;
   const { userId } = req.user;
@@ -803,7 +832,7 @@ export const biometricLogin = async (req: Request, res: Response) => {
     role: user.role,
     name: `${user.firstName} ${user.lastName}`,
     categoryId: user.categoryId,
-    jobTitles: user.jobTitles,
+    governmentIds: user.governmentIds,
     sessionId,
   };
   const accessToken = generateToken(payload);

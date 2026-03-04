@@ -11,13 +11,8 @@ const handleValidationErrors: RequestHandler = (req, res, next) => {
   next();
 };
 
-/**
- * =========================
- * REGISTER
- * =========================
- */
+
 export const validateRegister: RequestHandler[] = [
-  // Multer middleware first
   upload.fields([{ name: "profilePicture", maxCount: 1 }]),
 
   (req, res, next) => {
@@ -28,7 +23,7 @@ export const validateRegister: RequestHandler[] = [
     if (!files?.profilePicture?.[0]) {
       return res.status(400).json({
         success: false,
-        message: "profilePicture is required",
+        message: "Profile picture is required",
       });
     }
     next();
@@ -40,8 +35,10 @@ export const validateRegister: RequestHandler[] = [
     .isString()
     .withMessage("First name must be a string")
     .trim()
-    .isLength({ min: 2 })
-    .withMessage("First name too short"),
+    .isLength({ min: 2, max: 50 })
+    .withMessage("First name must be between 2 and 50 characters")
+    .matches(/^[a-zA-Z\u0600-\u06FF\s]+$/)
+    .withMessage("First name can only contain letters and spaces"),
 
   body("lastName")
     .notEmpty()
@@ -49,15 +46,19 @@ export const validateRegister: RequestHandler[] = [
     .isString()
     .withMessage("Last name must be a string")
     .trim()
-    .isLength({ min: 2 })
-    .withMessage("Last name too short"),
+    .isLength({ min: 2, max: 50 })
+    .withMessage("Last name must be between 2 and 50 characters")
+    .matches(/^[a-zA-Z\u0600-\u06FF\s]+$/)
+    .withMessage("Last name can only contain letters and spaces"),
 
   body("email")
     .notEmpty()
     .withMessage("Email is required")
     .isEmail()
-    .withMessage("Invalid email")
-    .normalizeEmail(),
+    .withMessage("Invalid email format")
+    .normalizeEmail()
+    .isLength({ max: 100 })
+    .withMessage("Email is too long"),
 
   body("phoneNumber")
     .notEmpty()
@@ -65,34 +66,24 @@ export const validateRegister: RequestHandler[] = [
     .isString()
     .withMessage("Phone number must be a string")
     .trim()
-    .isLength({ min: 10 })
-    .withMessage("Invalid phone number"),
+    .matches(/^01[0-9]{9}$/)
+    .withMessage("Phone number must be a valid Egyptian number (11 digits starting with 01)"),
 
   body("password")
     .notEmpty()
     .withMessage("Password is required")
     .isString()
     .withMessage("Password must be a string")
-    .isLength({ min: 8 })
-    .withMessage("Password too short")
+    .isLength({ min: 8, max: 100 })
+    .withMessage("Password must be between 8 and 100 characters")
     .matches(/[A-Z]/)
-    .withMessage("Must contain at least one uppercase letter")
+    .withMessage("Password must contain at least one uppercase letter")
+    .matches(/[a-z]/)
+    .withMessage("Password must contain at least one lowercase letter")
     .matches(/[0-9]/)
-    .withMessage("Must contain at least one number"),
-
-  body("role")
-    .notEmpty()
-    .withMessage("Role is required")
-    .optional()
-    .isIn(["customer", "supplier", "admin"])
-    .withMessage("Invalid role")
-    .default("supplier"),
-
-  // body('categoryId')
-  //   .notEmpty().withMessage('Category is required')
-  //   .isString().withMessage('Category ID must be a string')
-  //   .trim()
-  //   .notEmpty().withMessage('Category required'),
+    .withMessage("Password must contain at least one number")
+    .matches(/[!@#$%^&*(),.?":{}|<>]/)
+    .withMessage("Password must contain at least one special character"),
 
   body("address")
     .notEmpty()
@@ -100,8 +91,66 @@ export const validateRegister: RequestHandler[] = [
     .isString()
     .withMessage("Address must be a string")
     .trim()
-    .isLength({ min: 5 })
-    .withMessage("Address too short"),
+    .isLength({ min: 5, max: 200 })
+    .withMessage("Address must be between 5 and 200 characters"),
+
+  body("role")
+    .optional()
+    .isIn(["customer", "supplier"])
+    .withMessage("Role must be either customer or supplier")
+    .default("customer"),
+
+  body("categoryId")
+    .if(body("role").equals("supplier"))
+    .notEmpty()
+    .withMessage("Category is required for supplier")
+    .isString()
+    .withMessage("Category ID must be a string")
+    .trim()
+    .isMongoId()
+    .withMessage("Invalid category ID format"),
+
+  body("jobTitles")
+    .if(body("role").equals("supplier"))
+    .notEmpty()
+    .withMessage("Job titles are required for supplier")
+    .isArray()
+    .withMessage("Job titles must be an array")
+    .custom((value) => value.length > 0)
+    .withMessage("At least one job title is required")
+    .custom((value) => value.every((item: any) => typeof item === "string"))
+    .withMessage("All job titles must be strings"),
+
+  body("jobTitles.*")
+    .if(body("role").equals("supplier"))
+    .isString()
+    .withMessage("Each job title must be a string")
+    .trim()
+    .notEmpty()
+    .withMessage("Job title cannot be empty")
+    .isLength({ min: 2, max: 50 })
+    .withMessage("Job title must be between 2 and 50 characters"),
+
+  body("governmentIds")
+    .if(body("role").equals("supplier"))
+    .notEmpty()
+    .withMessage("Government/service areas are required for supplier")
+    .isArray()
+    .withMessage("Government IDs must be an array")
+    .custom((value) => value.length > 0)
+    .withMessage("At least one government/service area is required")
+    .custom((value) => value.every((item: any) => typeof item === "string"))
+    .withMessage("All government IDs must be strings"),
+
+  body("governmentIds.*")
+    .if(body("role").equals("supplier"))
+    .isString()
+    .withMessage("Each government ID must be a string")
+    .trim()
+    .notEmpty()
+    .withMessage("Government ID cannot be empty")
+    .isMongoId()
+    .withMessage("Invalid government ID format"),
 
   handleValidationErrors,
 ];

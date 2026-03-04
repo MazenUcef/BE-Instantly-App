@@ -5,15 +5,50 @@ import sessionModel from "../../session/models/session.model";
 import UserModel from "../../auth/models/User.model";
 import { publishNotification } from "../../notification/notification.publisher";
 import OfferModel from "../../offer/models/Offer.model";
+import GovernmentModel from "../../government/models/Government.model";
+import CategoryModel from "../../category/models/Category.model";
+import mongoose from "mongoose";
 
 export const createOrder = async (req: any, res: Response) => {
   try {
-    const { address, description, categoryId, requestedPrice, timeToStart } =
-      req.body;
+    const {
+      address,
+      description,
+      categoryId,
+      governmentId,
+      requestedPrice,
+      timeToStart,
+      jobTitle,
+    } = req.body;
     const { userId, name } = req.user;
 
     if (!requestedPrice || requestedPrice <= 0) {
       return res.status(400).json({ message: "Price is required" });
+    }
+
+    if (!governmentId) {
+      return res.status(400).json({ message: "Government is required" });
+    }
+
+    if (!jobTitle) {
+      return res.status(400).json({ message: "Job title is required" });
+    }
+
+    const government = await GovernmentModel.findById(governmentId);
+    if (!government) {
+      return res.status(400).json({ message: "Invalid government" });
+    }
+
+    const category = await CategoryModel.findById(categoryId);
+    if (!category) {
+      return res.status(400).json({ message: "Invalid category" });
+    }
+
+    if (!category.jobs || !category.jobs.includes(jobTitle)) {
+      return res.status(400).json({
+        message: "Invalid job title for this category",
+        availableJobTitles: category.jobs,
+      });
     }
 
     const existingOrder = await Order.findOne({
@@ -69,16 +104,43 @@ export const createOrder = async (req: any, res: Response) => {
       customerName: name,
       address,
       description,
-      categoryId,
+      categoryId: new mongoose.Types.ObjectId(categoryId),
+      governmentId: new mongoose.Types.ObjectId(governmentId),
+      jobTitle,
       requestedPrice,
       timeToStart,
       status: "pending",
     });
 
-    const io = getIO();
-    io.to(`category_${categoryId}`).emit("new_order", order);
+    const populatedOrder = await Order.findById(order._id)
+      .populate({
+        path: "governmentId",
+        select: "name nameAr country isActive",
+        model: GovernmentModel,
+      })
+      .populate({
+        path: "categoryId",
+        select: "name",
+        model: CategoryModel,
+      })
+      .lean();
 
-    res.status(201).json(order);
+    const io = getIO();
+    io.to(`category_${categoryId}_government_${governmentId}`).emit(
+      "new_order",
+      populatedOrder,
+    );
+
+    const responseData = {
+      ...populatedOrder,
+      selectedJobTitle: jobTitle,
+    };
+
+    res.status(201).json({
+      success: true,
+      message: "Order created successfully",
+      data: responseData,
+    });
   } catch (error) {
     console.error("Create order error:", error);
     res.status(500).json({ message: "Failed to create order" });
@@ -163,7 +225,23 @@ export const deleteOrder = async (req: any, res: Response) => {
 export const getActiveOrdersByCategory = async (req: any, res: Response) => {
   try {
     const supplierCategoryId = req.user.categoryId;
+    const supplierGovernmentIds = req.user.governmentIds || [];
     const userId = req.user.userId;
+
+    console.log("Supplier Info:", {
+      categoryId: supplierCategoryId,
+      governmentIds: supplierGovernmentIds,
+      userId,
+    });
+
+    if (!supplierGovernmentIds || supplierGovernmentIds.length === 0) {
+      return res.json({
+        type: "available_orders",
+        count: 0,
+        orders: [],
+        message: "No active orders for now",
+      });
+    }
 
     const activeOffer = await OfferModel.findOne({
       supplierId: userId,
@@ -171,7 +249,9 @@ export const getActiveOrdersByCategory = async (req: any, res: Response) => {
     }).sort({ createdAt: -1 });
 
     if (activeOffer) {
-      const activeOrder = await Order.findById(activeOffer.orderId);
+      const activeOrder = await Order.findById(activeOffer.orderId)
+        .populate("governmentId", "name nameAr country")
+        .populate("categoryId", "name");
 
       if (!activeOrder) {
         return res.status(404).json({
@@ -187,22 +267,45 @@ export const getActiveOrdersByCategory = async (req: any, res: Response) => {
 
     const orders = await Order.find({
       categoryId: supplierCategoryId,
+      governmentId: { $in: supplierGovernmentIds },
       status: "pending",
       customerId: { $ne: userId },
-    }).sort({ createdAt: -1 });
+    })
+      .populate({
+        path: "governmentId",
+        select: "name nameAr country isActive",
+        model: GovernmentModel,
+      })
+      .populate({
+        path: "categoryId",
+        select: "name description icon jobs",
+        model: CategoryModel,
+      })
+      .sort({ createdAt: -1 });
+
+    console.log(
+      `Found ${orders.length} orders matching category and government`,
+    );
 
     const enrichedOrders = await Promise.all(
       orders.map(async (order) => {
         try {
           const customer = await UserModel.findById(order.customerId).select(
-            "-password",
+            "-password -refreshToken -biometrics",
           );
+
+          const orderObj = order.toObject();
+          const { categoryId, ...rest } = orderObj;
+          const populatedCategory = orderObj.categoryId as any;
+          const {jobs, ...categoryWithoutJobs} = populatedCategory || { jobs: [] };
           return {
-            ...order.toObject(),
+            ...rest,
             customer: customer || null,
+            government: orderObj.governmentId,
+            category: categoryWithoutJobs,
           };
         } catch (err) {
-          console.error("Failed to fetch customer:", err);
+          console.error("Failed to fetch customer data:", err);
           return order;
         }
       }),
@@ -261,145 +364,5 @@ export const getCustomerOrderHistory = async (req: any, res: Response) => {
   } catch (error) {
     console.log("Get customer order history error:", error);
     res.status(500).json({ message: "Failed to fetch order history" });
-  }
-};
-
-export const updateOrderStatus = async (req: any, res: Response) => {
-  try {
-    const { id } = req.params;
-    const { status, price } = req.body;
-
-    const order = await Order.findById(id);
-    if (!order) return res.status(404).json({ message: "Order not found" });
-
-    const previousStatus = order.status;
-    order.status = status;
-
-    if (status === "completed") {
-      order.finalPrice = price ?? order.finalPrice;
-      order.customerReviewed = false;
-      order.supplierReviewed = false;
-    }
-
-    await order.save();
-
-    const session = await sessionModel.findOne({ orderId: order._id });
-
-    if (session) {
-      await publishNotification({
-        userId: order.customerId.toString(),
-        type: "ORDER_STATUS_UPDATED",
-        title: "Order Status Updated",
-        message: `Your order #${order._id} status has been updated to ${status}.`,
-        data: {
-          orderId: order._id.toString(),
-          previousStatus,
-          newStatus: status,
-        },
-      });
-
-      if (session.supplierId) {
-        await publishNotification({
-          userId: session.supplierId.toString(),
-          type: "ORDER_STATUS_UPDATED",
-          title: "Order Status Updated",
-          message: `Order #${order._id} status has been updated to ${status}.`,
-          data: {
-            orderId: order._id.toString(),
-            previousStatus,
-            newStatus: status,
-          },
-        });
-      }
-    }
-
-    const io = getIO();
-    io.to(`category_${order.categoryId}`).emit("order_status_updated", {
-      orderId: order._id,
-      status,
-    });
-
-    res.json({
-      message: `Order status updated to ${status}`,
-      order,
-    });
-  } catch (error) {
-    console.error("Update order status error:", error);
-    res.status(500).json({ message: "Failed to update order status" });
-  }
-};
-
-export const markOrderReviewed = async (req: any, res: Response) => {
-  const { id } = req.params;
-  const { role } = req.body;
-
-  const order = await Order.findById(id);
-  if (!order) return res.status(404).json({ message: "Order not found" });
-
-  if (role === "customer") {
-    order.customerReviewed = true;
-  }
-
-  if (role === "supplier") {
-    order.supplierReviewed = true;
-  }
-
-  await order.save();
-
-  res.json({ message: "Review status updated", order });
-};
-
-export const lockAndStartOrder = async (req: any, res: Response) => {
-  const { id } = req.params;
-
-  const order = await Order.findOneAndUpdate(
-    { _id: id, status: "pending" },
-    { status: "in_progress" },
-    { new: true },
-  );
-
-  if (!order) {
-    return res.status(400).json({
-      message: "Order already taken",
-    });
-  }
-
-  res.json(order);
-};
-
-export const getPendingReviewBySupplier = async (
-  req: Request,
-  res: Response,
-) => {
-  try {
-    const { supplierId } = req.params;
-
-    const order = await Order.findOne({
-      supplierId,
-      status: "completed",
-      supplierReviewed: false,
-    }).sort({ updatedAt: -1 });
-
-    if (!order) {
-      return res.json({
-        hasPendingReview: false,
-        order: null,
-      });
-    }
-
-    const customer = await UserModel.findById(order.customerId).select("-password");
-    const session = await sessionModel.findOne({ orderId: order._id });
-
-    res.json({
-      hasPendingReview: true,
-      order: {
-        ...order.toObject(),
-        customer: customer || null,
-        session: session || null,
-      },
-    });
-  } catch (error) {
-    console.error("Get pending review error:", error);
-    res.status(500).json({ message: "Failed to check review status" });
   }
 };
