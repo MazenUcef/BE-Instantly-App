@@ -1,5 +1,10 @@
 import { Request, Response } from "express";
 import JobSession from "../models/session.model";
+import Order from "../../order/models/Order.model";
+import Offer from "../../offer/models/Offer.model";
+import UserModel from "../../auth/models/User.model";
+import { getIO } from "../../../shared/config/socket";
+import { publishNotification } from "../../notification/notification.publisher";
 
 export const createSession = async (req: Request, res: Response) => {
   try {
@@ -26,8 +31,8 @@ export const createSession = async (req: Request, res: Response) => {
       supplierId,
       status: "accepted",
     });
-    const token = req.headers.authorization;
-    await sendNotification(token, {
+
+    await publishNotification({
       userId: customerId,
       type: "SESSION_CREATED",
       title: "New Job Started",
@@ -35,7 +40,7 @@ export const createSession = async (req: Request, res: Response) => {
       data: { sessionId: session._id, orderId, offerId, supplierId },
     });
 
-    await sendNotification(token, {
+    await publishNotification({
       userId: supplierId,
       type: "SESSION_CREATED",
       title: "New Job Assigned",
@@ -45,6 +50,7 @@ export const createSession = async (req: Request, res: Response) => {
 
     res.status(201).json(session);
   } catch (error) {
+    console.error("Create session error:", error);
     res.status(500).json({ message: "Failed to create session" });
   }
 };
@@ -75,41 +81,20 @@ export const getActiveSessionForUser = async (req: Request, res: Response) => {
     if (!session) {
       return res.json({ active: false });
     }
-    const token = req.headers.authorization;
-    const [orderRes, customerRes, supplierRes] = await Promise.all([
-      axios.get(
-        `${process.env.ORDER_SERVICE_URL}/api/orders/${session.orderId}`,
-        {
-          headers: {
-            Authorization: token,
-          },
-        },
-      ),
-      axios.get(
-        `${process.env.AUTH_SERVICE_URL}/api/auth/${session.customerId}`,
-        {
-          headers: {
-            Authorization: token,
-          },
-        },
-      ),
-      axios.get(
-        `${process.env.AUTH_SERVICE_URL}/api/auth/${session.supplierId}`,
-        {
-          headers: {
-            Authorization: token,
-          },
-        },
-      ),
+
+    const [order, customer, supplier] = await Promise.all([
+      Order.findById(session.orderId),
+      UserModel.findById(session.customerId).select("-password"),
+      UserModel.findById(session.supplierId).select("-password"),
     ]);
 
     res.json({
       active: true,
       session: {
         ...session.toObject(),
-        order: orderRes.data,
-        customer: customerRes.data,
-        supplier: supplierRes.data,
+        order,
+        customer,
+        supplier,
       },
     });
   } catch (error) {
@@ -121,7 +106,6 @@ export const getActiveSessionForUser = async (req: Request, res: Response) => {
 export const updateSessionStatus = async (req: any, res: Response) => {
   try {
     const { status } = req.body;
-    const token = req.headers.authorization;
 
     const allowedStatuses = [
       "on_the_way",
@@ -147,18 +131,16 @@ export const updateSessionStatus = async (req: any, res: Response) => {
 
     const io = getIO();
 
-    // 🔥 Emit real-time update to customer
     io.to(`user_${session.customerId}`).emit("supplier_status_update", {
       sessionId: session._id,
       status,
     });
 
-    // 🔥 Notify customer through Notification Service
-    await sendNotification(token, {
+    await publishNotification({
       userId: session.customerId.toString(),
       type: "SUPPLIER_STATUS_UPDATE",
       title: "Supplier Status Update",
-      message: `Your supplier has updated the session status to "${status}" for order #${session.orderId}.`,
+      message: `Your supplier updated the session to "${status}" for order #${session.orderId}.`,
       data: {
         sessionId: session._id,
         orderId: session.orderId,
@@ -189,35 +171,21 @@ export const completeSession = async (req: Request, res: Response) => {
       return res.status(400).json({ message: "Already completed" });
     }
 
-    const token = req.headers.authorization;
-
     session.status = "completed";
     session.completedAt = new Date();
     await session.save();
 
-    await axios.put(
-      `${process.env.ORDER_SERVICE_URL}/api/orders/${session.orderId}/status`,
+    const order = await Order.findByIdAndUpdate(
+      session.orderId,
       { status: "completed" },
-      { headers: { Authorization: token } },
+      { new: true },
     );
 
-    const [orderRes, offerRes, customerRes, supplierRes] = await Promise.all([
-      axios.get(
-        `${process.env.ORDER_SERVICE_URL}/api/orders/${session.orderId}`,
-        { headers: { Authorization: token } },
-      ),
-      axios.get(
-        `${process.env.OFFER_SERVICE_URL}/api/offers/${session.offerId}`,
-        { headers: { Authorization: token } },
-      ),
-      axios.get(
-        `${process.env.AUTH_SERVICE_URL}/api/auth/${session.customerId}`,
-        { headers: { Authorization: token } },
-      ),
-      axios.get(
-        `${process.env.AUTH_SERVICE_URL}/api/auth/${session.supplierId}`,
-        { headers: { Authorization: token } },
-      ),
+    const offer = await Offer.findById(session.offerId);
+
+    const [customer, supplier] = await Promise.all([
+      UserModel.findById(session.customerId).select("-password"),
+      UserModel.findById(session.supplierId).select("-password"),
     ]);
 
     const io = getIO();
@@ -230,30 +198,28 @@ export const completeSession = async (req: Request, res: Response) => {
       sessionId: session._id,
     });
 
-    await sendNotification(token, {
+    await publishNotification({
       userId: session.customerId.toString(),
       type: "SESSION_COMPLETED",
       title: "Job Completed",
       message: `Your job for order #${session.orderId} has been completed.`,
-      data: { sessionId: session._id, orderId: session.orderId, supplierId: session.supplierId },
     });
 
-    await sendNotification(token, {
+    await publishNotification({
       userId: session.supplierId.toString(),
       type: "SESSION_COMPLETED",
       title: "Job Completed",
       message: `You have completed the Job for order #${session.orderId}.`,
-      data: { sessionId: session._id, orderId: session.orderId, customerId: session.customerId },
     });
 
     res.json({
       message: "Session completed successfully",
       session: {
         ...session.toObject(),
-        order: orderRes.data,
-        offer: offerRes.data,
-        customer: customerRes.data,
-        supplier: supplierRes.data,
+        order,
+        offer,
+        customer,
+        supplier,
       },
     });
   } catch (error) {

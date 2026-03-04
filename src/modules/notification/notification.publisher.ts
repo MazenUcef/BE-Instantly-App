@@ -1,7 +1,7 @@
 import { getChannel } from "../../shared/config/rabbitmq";
 
 
-interface NotificationPayload {
+export interface NotificationPayload {
   userId: string;
   type: string;
   title: string;

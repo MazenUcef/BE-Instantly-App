@@ -3,7 +3,7 @@ import {
   sendMessage,
   getMessagesBySession,
 } from "../controllers/chat.controller";
-import { authenticate } from "../middlewares/auth";
+import { authenticate } from "../../../shared/middlewares/auth";
 
 const router = express.Router();
 

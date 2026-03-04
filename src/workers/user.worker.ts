@@ -33,6 +33,5 @@ export const startUserWorker = async () => {
       console.error("Error processing USER_REGISTERED", err);
     }
   });
-
-  console.log("🚀 User worker running, waiting for messages...");
+console.log("✅ User worker started, listening to 'USER_REGISTERED'");
 };

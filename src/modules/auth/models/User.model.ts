@@ -23,6 +23,12 @@ const UserSchema = new Schema<IUser>(
       default: null,
     },
 
+    governmentIds: [{
+      type: Schema.Types.ObjectId,
+      ref: "Government",
+      required: false,
+    }],
+
     profilePicture: String,
 
     isEmailVerified: { type: Boolean, default: false },
@@ -54,10 +60,10 @@ const UserSchema = new Schema<IUser>(
       default: 0,
     },
 
-    jobTitle: {
-      type: String,
+    jobTitles: {
+      type: [String],
       required: false,
-      default: null,
+      default: [],
     },
 
     reviews: [
@@ -75,5 +81,6 @@ const UserSchema = new Schema<IUser>(
 
 UserSchema.index({ email: 1 }, { unique: true });
 UserSchema.index({ phoneNumber: 1 }, { unique: true });
+UserSchema.index({ governmentIds: 1 });
 
 export default mongoose.model<IUser>("User", UserSchema);

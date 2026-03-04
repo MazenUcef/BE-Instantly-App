@@ -323,3 +323,20 @@ export const validateVerifyResetOTP = [
     .withMessage("OTP must be 6 digits"),
   handleValidationErrors,
 ];
+
+
+export const validateCreateOrder: RequestHandler[] = [
+  body('address')
+    .notEmpty().withMessage('Address is required')
+    .isString().withMessage('Address must be a string'),
+
+  body('description')
+    .notEmpty().withMessage('Description is required')
+    .isString().withMessage('Description must be a string'),
+
+  body('categoryId')
+    .notEmpty().withMessage('Category ID is required')
+    .isString().withMessage('Category ID must be a string'),
+
+  handleValidationErrors
+];

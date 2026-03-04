@@ -8,6 +8,7 @@ import redis from "./shared/config/redis";
 import { startUserWorker } from "./workers/user.worker";
 import { startNotificationWorker } from "./workers/notification.worker";
 import { startEmailWorker } from "./workers/email.worker";
+import { startCategoryWorker } from "./workers/category.worker";
 
 dotenv.config();
 const PORT = process.env.PORT || 6000;
@@ -18,6 +19,7 @@ const startServer = async () => {
     await startUserWorker();
     await startNotificationWorker();
     await startEmailWorker();
+    await startCategoryWorker();
     await redis.ping();
     console.log("✅ Redis ready");
 

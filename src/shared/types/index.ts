@@ -1,5 +1,5 @@
 import { Document, Types } from "mongoose";
-import { Request } from 'express';
+import { Request } from "express";
 
 export interface ICategory extends Document {
   name: string;
@@ -15,12 +15,13 @@ export interface IUser {
   lastName: string;
   email: string;
   password: string;
-  role: 'customer' | 'supplier' | 'admin';
+  role: "customer" | "supplier" | "admin";
   isProfileComplete: boolean;
   address: string;
   categoryId: Types.ObjectId;
   nationalId: string;
-  jobTitle?: string | null;
+  governmentIds?: Types.ObjectId[];
+  jobTitles?: string[];
   phoneNumber: string;
   nationalIdPhotoFront?: string;
   nationalIdPhotoBack?: string;
@@ -33,7 +34,7 @@ export interface IUser {
   updatedAt: Date;
   biometrics?: Array<{
     deviceId: string;
-    type: 'faceid' | 'fingerprint' | 'passcode';
+    type: "faceid" | "fingerprint" | "passcode";
     passcodeHash?: string;
     createdAt: Date;
   }>;

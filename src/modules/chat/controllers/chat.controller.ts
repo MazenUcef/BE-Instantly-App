@@ -1,19 +1,18 @@
 import { Response } from "express";
 import Message from "../models/Message.model";
 import { getIO } from "../../../shared/config/socket";
+import JobSession from "../../session/models/session.model";
 
 export const sendMessage = async (req: any, res: Response) => {
   try {
     const { sessionId, message } = req.body;
     const senderId = req.user.userId;
-    const token = req.headers.authorization;
 
-    const sessionResponse = await axios.get(
-      `${process.env.SESSION_SERVICE_URL}/api/sessions/${sessionId}`,
-      { headers: { Authorization: token } },
-    );
+    const session = await JobSession.findById(sessionId);
 
-    const session = sessionResponse.data;
+    if (!session) {
+      return res.status(404).json({ message: "Session not found" });
+    }
 
     if (["completed", "cancelled"].includes(session.status)) {
       return res.status(403).json({
@@ -21,12 +20,17 @@ export const sendMessage = async (req: any, res: Response) => {
       });
     }
 
-    if (session.customerId !== senderId && session.supplierId !== senderId) {
+    if (
+      session.customerId.toString() !== senderId &&
+      session.supplierId.toString() !== senderId
+    ) {
       return res.status(403).json({ message: "Not allowed in this chat" });
     }
 
     const receiverId =
-      senderId === session.customerId ? session.supplierId : session.customerId;
+      senderId === session.customerId.toString()
+        ? session.supplierId.toString()
+        : session.customerId.toString();
 
     const newMessage = await Message.create({
       sessionId,
@@ -49,14 +53,12 @@ export const getMessagesBySession = async (req: any, res: Response) => {
   try {
     const { sessionId } = req.params;
     const userId = req.user.userId;
-    const token = req.headers.authorization;
 
-    const sessionResponse = await axios.get(
-      `${process.env.SESSION_SERVICE_URL}/api/sessions/${sessionId}`,
-      { headers: { Authorization: token } }
-    );
+    const session = await JobSession.findById(sessionId);
 
-    const session = sessionResponse.data;
+    if (!session) {
+      return res.status(404).json({ message: "Session not found" });
+    }
 
     if (["completed", "cancelled"].includes(session.status)) {
       return res.status(403).json({
@@ -65,8 +67,8 @@ export const getMessagesBySession = async (req: any, res: Response) => {
     }
 
     if (
-      session.customerId !== userId &&
-      session.supplierId !== userId
+      session.customerId.toString() !== userId &&
+      session.supplierId.toString() !== userId
     ) {
       return res.status(403).json({ message: "Not allowed" });
     }

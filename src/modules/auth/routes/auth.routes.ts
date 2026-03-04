@@ -15,6 +15,9 @@ import {
   updateUserRating,
   resendVerificationEmail,
   verifyResetOTP,
+  registerDevice,
+  biometricLogin,
+  removeDevice,
 } from "../controllers/auth.controller";
 import { validateForgotPassword, validateLogin, validateRefreshToken, validateRegister, validateResendVerification, validateResetPassword, validateVerifyEmailOTP, validateVerifyResetOTP } from "../../../shared/middlewares/validate";
 import { authenticate } from "../../../shared/middlewares/auth";
@@ -50,5 +53,9 @@ router.put("/:id", authenticate, updateUser);
 router.delete("/:id", authenticate, deleteUser);
 
 router.patch("/:id/update-rating", updateUserRating);
+
+router.post("/devices/register", authenticate, registerDevice);
+router.post("/devices/login", biometricLogin);
+router.delete("/devices/remove", authenticate, removeDevice);
 
 export default router;
