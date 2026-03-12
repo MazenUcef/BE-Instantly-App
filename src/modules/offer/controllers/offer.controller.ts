@@ -427,7 +427,7 @@ export const getAcceptedOfferHistory = async (req: any, res: Response) => {
             customer: customer || null,
           };
         } catch (err) {
-          console.error("Failed to fetch order details:", err);
+          console.error("Failed to fetch offer details:", err);
           return offer;
         }
       }),

@@ -1,0 +1,14 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+const express_1 = require("express");
+const offer_controller_1 = require("../controllers/offer.controller");
+const auth_1 = require("../../../shared/middlewares/auth");
+const router = (0, express_1.Router)();
+router.post("/", auth_1.authenticate, (0, auth_1.authorize)("supplier"), offer_controller_1.createOffer);
+router.put("/accept/:id", auth_1.authenticate, (0, auth_1.authorize)("customer"), offer_controller_1.acceptOffer);
+router.put("/reject/:id", auth_1.authenticate, (0, auth_1.authorize)("customer"), offer_controller_1.rejectOffer);
+router.get("/order/:orderId", auth_1.authenticate, offer_controller_1.getOffersByOrder);
+router.get("/supplier/history", auth_1.authenticate, (0, auth_1.authorize)("supplier"), offer_controller_1.getAcceptedOfferHistory);
+router.delete("/:id", auth_1.authenticate, (0, auth_1.authorize)("supplier"), offer_controller_1.deleteOffer);
+router.post("/accept-order-direct/:orderId", auth_1.authenticate, (0, auth_1.authorize)("supplier"), offer_controller_1.acceptOrderDirect);
+exports.default = router;

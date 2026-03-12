@@ -1,0 +1,14 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+const express_1 = require("express");
+const auth_1 = require("../../../shared/middlewares/auth");
+const Government_controller_1 = require("../controller/Government.controller");
+const router = (0, express_1.Router)();
+router.get("/", Government_controller_1.getAllGovernments);
+router.get("/:id", Government_controller_1.getGovernmentById);
+router.post("/", auth_1.authenticate, (0, auth_1.authorize)("admin"), Government_controller_1.createGovernment);
+router.put("/:id", auth_1.authenticate, (0, auth_1.authorize)("admin"), Government_controller_1.updateGovernment);
+router.delete("/:id", auth_1.authenticate, (0, auth_1.authorize)("admin"), Government_controller_1.deleteGovernment);
+router.patch("/:id/toggle", auth_1.authenticate, (0, auth_1.authorize)("admin"), Government_controller_1.toggleGovernmentStatus);
+router.get("/admin/all", auth_1.authenticate, (0, auth_1.authorize)("admin"), Government_controller_1.getAllGovernmentsAdmin);
+exports.default = router;

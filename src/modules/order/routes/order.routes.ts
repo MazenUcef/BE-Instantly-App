@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { createOrder, deleteOrder, getActiveOrdersByCategory, getCustomerOrderHistory, getOrderDetails, updateOrderPrice } from "../controllers/order.controller";
+import { checkPendingOrders, createOrder, deleteOrder, getActiveOrdersByCategory, getCustomerOrderHistory, getOrderDetails, updateOrderPrice } from "../controllers/order.controller";
 import { authenticate, authorize } from "../../../shared/middlewares/auth";
 import { validateCreateOrder } from "../../../shared/middlewares/validate";
 
@@ -13,10 +13,12 @@ router.delete("/:id", authenticate, authorize("customer"), deleteOrder);
 router.get("/history", authenticate, authorize("customer"), getCustomerOrderHistory);
 
 router.get("/active", authenticate, authorize("supplier"), getActiveOrdersByCategory);
+router.patch("/:id/price", authenticate, authorize("customer"), updateOrderPrice);
+router.get('/check-pending', authenticate, checkPendingOrders);
+
+
+
 
 router.get("/:id", authenticate, getOrderDetails);
-
-router.patch("/:id/price", authenticate, authorize("customer"), updateOrderPrice);
-
 
 export default router;

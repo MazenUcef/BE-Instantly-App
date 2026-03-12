@@ -245,6 +245,27 @@ export const login = async (req: Request, res: Response) => {
     }
 
     let categoryData = null;
+    let governmentsData: any[] = [];
+
+    
+    if (user.governmentIds && user.governmentIds.length > 0) {
+      const governmentObjectIds = user.governmentIds.map(
+        id => new mongoose.Types.ObjectId(id.toString())
+      );
+      
+      const governments = await GovernmentModel.find({
+        _id: { $in: governmentObjectIds },
+        isActive: true
+      }).sort({ order: 1 });
+
+      governmentsData = governments.map(gov => ({
+        id: gov._id,
+        name: gov.name,
+        nameAr: gov.nameAr,
+        country: gov.country,
+        order: gov.order
+      }));
+    }
 
     if (user.role === "supplier") {
       if (!user.categoryId) {
@@ -290,8 +311,11 @@ export const login = async (req: Request, res: Response) => {
     res.json({
       accessToken,
       refreshToken,
-      user: safeUser,
+      user: {
+        ...safeUser,
+      },
       category,
+      governments: governmentsData,
     });
   } catch (error: any) {
     res.status(error.statusCode || 500).json({

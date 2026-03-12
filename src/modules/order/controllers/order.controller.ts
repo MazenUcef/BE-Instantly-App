@@ -366,3 +366,78 @@ export const getCustomerOrderHistory = async (req: any, res: Response) => {
     res.status(500).json({ message: "Failed to fetch order history" });
   }
 };
+
+
+
+export const checkPendingOrders = async (req: any, res: Response) => {
+  try {
+    const userId = req.user.userId;
+
+    const activeOrder = await Order.findOne({
+      customerId: userId,
+      status: { $in: ["pending", "in_progress"] },
+    }).sort({ createdAt: -1 });
+
+    if (activeOrder) {
+      return res.json({
+        hasPendingOrders: true,
+        pendingOrder: activeOrder,
+        status: activeOrder.status,
+        message: "You have an active order",
+      });
+    }
+
+    const pendingReviewOrder = await Order.findOne({
+      customerId: userId,
+      status: "completed",
+      customerReviewed: false,
+    }).sort({ createdAt: -1 });
+
+    if (pendingReviewOrder) {
+      const session = await sessionModel.findOne({
+        orderId: pendingReviewOrder._id,
+      });
+
+      let supplierData = null;
+      if (session) {
+        supplierData = await UserModel.findById(session.supplierId).select(
+          "-password -refreshToken -biometrics",
+        );
+      }
+
+      return res.json({
+        hasPendingOrders: true,
+        reviewRequired: true,
+        pendingOrder: pendingReviewOrder,
+        supplier: supplierData,
+        message: "You have a completed order that needs review",
+      });
+    }
+
+    const anyPendingOrder = await Order.findOne({
+      customerId: userId,
+      status: "pending",
+    }).sort({ createdAt: -1 });
+
+    if (anyPendingOrder) {
+      return res.json({
+        hasPendingOrders: true,
+        pendingOrder: anyPendingOrder,
+        status: "pending",
+        message: "You have a pending order",
+      });
+    }
+
+    return res.json({
+      hasPendingOrders: false,
+      message: "No pending orders found",
+    });
+
+  } catch (error) {
+    console.error("Check pending orders error:", error);
+    res.status(500).json({ 
+      success: false,
+      message: "Failed to check pending orders" 
+    });
+  }
+};

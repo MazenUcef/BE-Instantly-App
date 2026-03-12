@@ -160,7 +160,7 @@ export const validateRegister: RequestHandler[] = [
  * VERIFY PHONE OTP
  * =========================
  */
-export const validateVerifyPhoneOTP: RequestHandler[] = [
+export const validateVerifyPhoneOTP: RequestHandler[] = [ 
   body("phoneNumber")
     .notEmpty()
     .withMessage("Phone number is required")
