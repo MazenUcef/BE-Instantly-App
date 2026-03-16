@@ -51,6 +51,7 @@ export interface IUser {
 
 export interface ITokenPayload {
   userId: string;
+  email: string;
   role: string;
   sessionId?: string;
   iat?: number;

@@ -121,9 +121,9 @@ export const validateRegister: RequestHandler[] = [
     .withMessage("Job titles are required for supplier")
     .isArray()
     .withMessage("Job titles must be an array")
-    .custom((value) => value.length > 0)
+    .custom((value: any) => value.length > 0)
     .withMessage("At least one job title is required")
-    .custom((value) => value.every((item: any) => typeof item === "string"))
+    .custom((value: any) => value.every((item: any) => typeof item === "string"))
     .withMessage("All job titles must be strings"),
 
   body("jobTitles.*")
@@ -142,9 +142,9 @@ export const validateRegister: RequestHandler[] = [
     .withMessage("Government/service areas are required for supplier")
     .isArray()
     .withMessage("Government IDs must be an array")
-    .custom((value) => value.length > 0)
+    .custom((value: any) => value.length > 0)
     .withMessage("At least one government/service area is required")
-    .custom((value) => value.every((item: any) => typeof item === "string"))
+    .custom((value: any) => value.every((item: any) => typeof item === "string"))
     .withMessage("All government IDs must be strings"),
 
   body("governmentIds.*")

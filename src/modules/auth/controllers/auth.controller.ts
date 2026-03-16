@@ -294,6 +294,7 @@ export const login = async (req: Request, res: Response) => {
 
     const payload = {
       userId: user._id.toString(),
+      email: user.email,
       role: user.role,
       name: `${user.firstName} ${user.lastName}`,
       categoryId: user.categoryId,
@@ -350,11 +351,12 @@ export const refreshToken = async (req: Request, res: Response) => {
   const newSessionId = crypto.randomUUID();
   const payload = {
     userId: user._id.toString(),
+    email: user.email,
     role: user.role,
-    sessionId: newSessionId,
     name: `${user.firstName} ${user.lastName}`,
     governmentIds: user.governmentIds,
     categoryId: user.categoryId,
+    sessionId: newSessionId,
   };
 
   const newAccessToken = generateToken(payload);
@@ -433,7 +435,7 @@ export const forgotPassword = async (req: Request, res: Response) => {
       },
     });
 
-    console.log("📤 Password reset OTP sent to:", { email, otp: resetOTP });
+    console.log(" Password reset OTP sent to:", { email, otp: resetOTP });
 
     res.json({
       success: true,
@@ -602,7 +604,7 @@ export const resendVerificationEmail = async (req: Request, res: Response) => {
     await redis.incr(rateLimitKey);
     await redis.expire(rateLimitKey, 3600);
 
-    console.log("📤 Resending verification email to:", {
+    console.log(" Resending verification email to:", {
       userId: user._id.toString(),
       email: user.email,
       otp: emailOtp,
@@ -616,7 +618,7 @@ export const resendVerificationEmail = async (req: Request, res: Response) => {
       isResend: true,
     });
 
-    console.log("✅ Resend verification email published successfully");
+    console.log(" Resend verification email published successfully");
 
     res.json({
       success: true,
@@ -708,6 +710,7 @@ export const switchRole = async (req: any, res: Response) => {
 
   const payload = {
     userId: user._id.toString(),
+    email: user.email,
     role: user.role,
     name: `${user.firstName} ${user.lastName}`,
     categoryId: user.categoryId,
@@ -869,6 +872,7 @@ export const biometricLogin = async (req: Request, res: Response) => {
   const sessionId = crypto.randomUUID();
   const payload = {
     userId: user._id.toString(),
+    email: user.email,
     role: user.role,
     name: `${user.firstName} ${user.lastName}`,
     categoryId: user.categoryId,

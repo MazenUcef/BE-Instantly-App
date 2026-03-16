@@ -3,17 +3,22 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.validateCreateOrder = exports.validateVerifyResetOTP = exports.validateResendVerification = exports.validateQueryParams = exports.validateIdParam = exports.validateUpdateCategory = exports.validateCreateCategory = exports.validateResetPassword = exports.validateForgotPassword = exports.validateRefreshToken = exports.validateLogin = exports.validateVerifyEmailOTP = exports.validateVerifyPhoneOTP = exports.validateRegister = void 0;
+exports.validateCreateOrder = exports.validateVerifyResetOTP = exports.validateResendVerification = exports.validateQueryParams = exports.validateIdParam = exports.validateUpdateCategory = exports.validateCreateCategory = exports.validateResetPassword = exports.validateForgotPassword = exports.validateRefreshToken = exports.validateLogin = exports.validateVerifyEmailOTP = exports.validateVerifyPhoneOTP = exports.validateRegister = exports.handleValidationErrors = void 0;
 const express_validator_1 = require("express-validator");
 const multer_1 = __importDefault(require("../config/multer"));
 const handleValidationErrors = (req, res, next) => {
     const errors = (0, express_validator_1.validationResult)(req);
     if (!errors.isEmpty()) {
-        res.status(400).json({ errors: errors.array() });
-        return;
+        console.log(errors.array());
+        return res.status(400).json({
+            success: false,
+            errors: errors.array(),
+            message: 'Validation failed'
+        });
     }
     next();
 };
+exports.handleValidationErrors = handleValidationErrors;
 exports.validateRegister = [
     multer_1.default.fields([{ name: "profilePicture", maxCount: 1 }]),
     (req, res, next) => {
@@ -137,7 +142,7 @@ exports.validateRegister = [
         .withMessage("Government ID cannot be empty")
         .isMongoId()
         .withMessage("Invalid government ID format"),
-    handleValidationErrors,
+    exports.handleValidationErrors,
 ];
 /**
  * =========================
@@ -163,7 +168,7 @@ exports.validateVerifyPhoneOTP = [
         .withMessage("OTP must be 6 digits")
         .isNumeric()
         .withMessage("OTP must contain only numbers"),
-    handleValidationErrors,
+    exports.handleValidationErrors,
 ];
 /**
  * =========================
@@ -187,7 +192,7 @@ exports.validateVerifyEmailOTP = [
         .withMessage("OTP must be 6 digits")
         .isNumeric()
         .withMessage("OTP must contain only numbers"),
-    handleValidationErrors,
+    exports.handleValidationErrors,
 ];
 /**
  * =========================
@@ -208,7 +213,7 @@ exports.validateLogin = [
         .withMessage("Password must be a string")
         .notEmpty()
         .withMessage("Password required"),
-    handleValidationErrors,
+    exports.handleValidationErrors,
 ];
 /**
  * =========================
@@ -221,7 +226,7 @@ exports.validateRefreshToken = [
         .withMessage("Refresh token must be a string")
         .isLength({ min: 10 })
         .withMessage("Invalid refresh token"),
-    handleValidationErrors,
+    exports.handleValidationErrors,
 ];
 /**
  * =========================
@@ -235,7 +240,7 @@ exports.validateForgotPassword = [
         .isEmail()
         .withMessage("Invalid email")
         .normalizeEmail(),
-    handleValidationErrors,
+    exports.handleValidationErrors,
 ];
 /**
  * =========================
@@ -259,7 +264,7 @@ exports.validateResetPassword = [
         .withMessage("Must contain at least one uppercase letter")
         .matches(/[0-9]/)
         .withMessage("Must contain at least one number"),
-    handleValidationErrors,
+    exports.handleValidationErrors,
 ];
 /**
  * =========================
@@ -273,7 +278,7 @@ exports.validateCreateCategory = [
         .trim()
         .isLength({ min: 2 })
         .withMessage("Category name too short"),
-    handleValidationErrors,
+    exports.handleValidationErrors,
 ];
 exports.validateUpdateCategory = [
     (0, express_validator_1.body)("name")
@@ -282,7 +287,7 @@ exports.validateUpdateCategory = [
         .trim()
         .isLength({ min: 2 })
         .withMessage("Category name too short"),
-    handleValidationErrors,
+    exports.handleValidationErrors,
 ];
 // For URL parameters validation
 exports.validateIdParam = [
@@ -291,7 +296,7 @@ exports.validateIdParam = [
         .withMessage("ID must be a string")
         .notEmpty()
         .withMessage("ID is required"),
-    handleValidationErrors,
+    exports.handleValidationErrors,
 ];
 // For query parameters validation
 exports.validateQueryParams = [
@@ -305,7 +310,7 @@ exports.validateQueryParams = [
         .isInt({ min: 1, max: 100 })
         .withMessage("Limit must be between 1 and 100")
         .toInt(),
-    handleValidationErrors,
+    exports.handleValidationErrors,
 ];
 exports.validateResendVerification = [
     (0, express_validator_1.body)("email")
@@ -314,7 +319,7 @@ exports.validateResendVerification = [
         .isEmail()
         .withMessage("Invalid email")
         .normalizeEmail(),
-    handleValidationErrors,
+    exports.handleValidationErrors,
 ];
 exports.validateVerifyResetOTP = [
     (0, express_validator_1.body)("email")
@@ -327,17 +332,23 @@ exports.validateVerifyResetOTP = [
         .withMessage("OTP is required")
         .isLength({ min: 6, max: 6 })
         .withMessage("OTP must be 6 digits"),
-    handleValidationErrors,
+    exports.handleValidationErrors,
 ];
 exports.validateCreateOrder = [
-    (0, express_validator_1.body)('address')
-        .notEmpty().withMessage('Address is required')
-        .isString().withMessage('Address must be a string'),
-    (0, express_validator_1.body)('description')
-        .notEmpty().withMessage('Description is required')
-        .isString().withMessage('Description must be a string'),
-    (0, express_validator_1.body)('categoryId')
-        .notEmpty().withMessage('Category ID is required')
-        .isString().withMessage('Category ID must be a string'),
-    handleValidationErrors
+    (0, express_validator_1.body)("address")
+        .notEmpty()
+        .withMessage("Address is required")
+        .isString()
+        .withMessage("Address must be a string"),
+    (0, express_validator_1.body)("description")
+        .notEmpty()
+        .withMessage("Description is required")
+        .isString()
+        .withMessage("Description must be a string"),
+    (0, express_validator_1.body)("categoryId")
+        .notEmpty()
+        .withMessage("Category ID is required")
+        .isString()
+        .withMessage("Category ID must be a string"),
+    exports.handleValidationErrors,
 ];

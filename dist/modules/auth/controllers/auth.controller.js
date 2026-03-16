@@ -54,7 +54,10 @@ const rabbitmq_1 = require("../../../shared/config/rabbitmq");
 const Government_model_1 = __importDefault(require("../../government/models/Government.model"));
 const register = async (req, res) => {
     try {
+        console.log("req.body:", req.body);
+        console.log("req.files:", req.files);
         const data = req.body;
+        console.log("data", data);
         const existingUser = await User_model_1.default.findOne({
             $or: [{ email: data.email }, { phoneNumber: data.phoneNumber }],
         });
@@ -93,11 +96,12 @@ const register = async (req, res) => {
             if (!Array.isArray(data.jobTitles) || data.jobTitles.length === 0) {
                 throw new errorHandler_1.AppError("At least one job title is required for supplier", 400);
             }
-            if (!Array.isArray(data.governmentIds) || data.governmentIds.length === 0) {
+            if (!Array.isArray(data.governmentIds) ||
+                data.governmentIds.length === 0) {
                 throw new errorHandler_1.AppError("At least one government/service area is required for supplier", 400);
             }
             const governments = await Government_model_1.default.find({
-                _id: { $in: data.governmentIds }
+                _id: { $in: data.governmentIds },
             });
             if (governments.length !== data.governmentIds.length) {
                 throw new errorHandler_1.AppError("One or more governments are invalid", 400);
@@ -145,6 +149,11 @@ const register = async (req, res) => {
         });
     }
     catch (error) {
+        console.error("Registration error details:", {
+            message: error.message,
+            stack: error.stack,
+            statusCode: error.statusCode,
+        });
         res.status(error.statusCode || 500).json({
             success: false,
             message: error.message,
@@ -221,17 +230,17 @@ const login = async (req, res) => {
         let categoryData = null;
         let governmentsData = [];
         if (user.governmentIds && user.governmentIds.length > 0) {
-            const governmentObjectIds = user.governmentIds.map(id => new mongoose_1.default.Types.ObjectId(id.toString()));
+            const governmentObjectIds = user.governmentIds.map((id) => new mongoose_1.default.Types.ObjectId(id.toString()));
             const governments = await Government_model_1.default.find({
                 _id: { $in: governmentObjectIds },
-                isActive: true
+                isActive: true,
             }).sort({ order: 1 });
-            governmentsData = governments.map(gov => ({
+            governmentsData = governments.map((gov) => ({
                 id: gov._id,
                 name: gov.name,
                 nameAr: gov.nameAr,
                 country: gov.country,
-                order: gov.order
+                order: gov.order,
             }));
         }
         if (user.role === "supplier") {
@@ -247,6 +256,7 @@ const login = async (req, res) => {
         const sessionId = crypto_2.default.randomUUID();
         const payload = {
             userId: user._id.toString(),
+            email: user.email,
             role: user.role,
             name: `${user.firstName} ${user.lastName}`,
             categoryId: user.categoryId,
@@ -290,11 +300,12 @@ const refreshToken = async (req, res) => {
     const newSessionId = crypto_2.default.randomUUID();
     const payload = {
         userId: user._id.toString(),
+        email: user.email,
         role: user.role,
-        sessionId: newSessionId,
         name: `${user.firstName} ${user.lastName}`,
         governmentIds: user.governmentIds,
         categoryId: user.categoryId,
+        sessionId: newSessionId,
     };
     const newAccessToken = (0, token_1.generateToken)(payload);
     const newRefreshToken = (0, token_1.generateRefreshToken)(payload);
@@ -345,7 +356,7 @@ const forgotPassword = async (req, res) => {
                 firstName: user.firstName,
             },
         });
-        console.log("📤 Password reset OTP sent to:", { email, otp: resetOTP });
+        console.log(" Password reset OTP sent to:", { email, otp: resetOTP });
         res.json({
             success: true,
             message: "Password reset code has been sent to your email",
@@ -469,7 +480,7 @@ const resendVerificationEmail = async (req, res) => {
         await (0, otp_1.saveEmailOTP)(user.email, emailOtp);
         await redis_1.default.incr(rateLimitKey);
         await redis_1.default.expire(rateLimitKey, 3600);
-        console.log("📤 Resending verification email to:", {
+        console.log(" Resending verification email to:", {
             userId: user._id.toString(),
             email: user.email,
             otp: emailOtp,
@@ -481,7 +492,7 @@ const resendVerificationEmail = async (req, res) => {
             otp: emailOtp,
             isResend: true,
         });
-        console.log("✅ Resend verification email published successfully");
+        console.log(" Resend verification email published successfully");
         res.json({
             success: true,
             message: "Verification email has been resent successfully",
@@ -499,7 +510,7 @@ exports.resendVerificationEmail = resendVerificationEmail;
 const switchRole = async (req, res) => {
     console.log("switchRole - req.user:", req.user);
     console.log("switchRole - req.body:", req.body);
-    console.log("switchRole - req.headers.content-type:", req.headers['content-type']);
+    console.log("switchRole - req.headers.content-type:", req.headers["content-type"]);
     const { userId, role, sessionId } = req.user;
     const { targetRole, categoryId, jobs, governmentIds } = req.body;
     console.log("req.body", req.body);
@@ -536,7 +547,7 @@ const switchRole = async (req, res) => {
                 throw new errorHandler_1.AppError("At least one government/service area is required for supplier", 400);
             }
             const governments = await Government_model_1.default.find({
-                _id: { $in: governmentIds }
+                _id: { $in: governmentIds },
             });
             if (governments.length !== governmentIds.length) {
                 throw new errorHandler_1.AppError("One or more governments are invalid", 400);
@@ -550,6 +561,7 @@ const switchRole = async (req, res) => {
     const newSessionId = crypto_2.default.randomUUID();
     const payload = {
         userId: user._id.toString(),
+        email: user.email,
         role: user.role,
         name: `${user.firstName} ${user.lastName}`,
         categoryId: user.categoryId,
@@ -626,7 +638,9 @@ const updateUser = async (req, res) => {
     Object.assign(user, updates);
     await user.save();
     const { password, ...safeUser } = user.toObject();
-    res.status(200).json({ message: "User updated", data: safeUser });
+    res
+        .status(200)
+        .json({ message: "User updated successfully", data: safeUser });
 };
 exports.updateUser = updateUser;
 const deleteUser = async (req, res) => {
@@ -684,6 +698,7 @@ const biometricLogin = async (req, res) => {
     const sessionId = crypto_2.default.randomUUID();
     const payload = {
         userId: user._id.toString(),
+        email: user.email,
         role: user.role,
         name: `${user.firstName} ${user.lastName}`,
         categoryId: user.categoryId,
