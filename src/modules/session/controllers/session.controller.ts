@@ -104,7 +104,7 @@ export const getSessionById = async (req: Request, res: Response) => {
     console.error("Get session by ID error:", error);
     res.status(500).json({ message: "Failed to fetch session" });
   }
-};
+}; 
 
 export const getActiveSessionForUser = async (req: Request, res: Response) => {
   try {

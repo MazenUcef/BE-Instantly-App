@@ -18,7 +18,16 @@ import {
   biometricLogin,
   removeDevice,
 } from "../controllers/auth.controller";
-import { validateForgotPassword, validateLogin, validateRefreshToken, validateRegister, validateResendVerification, validateResetPassword, validateVerifyEmailOTP, validateVerifyResetOTP } from "../../../shared/middlewares/validate";
+import {
+  validateForgotPassword,
+  validateLogin,
+  validateRefreshToken,
+  validateRegister,
+  validateResendVerification,
+  validateResetPassword,
+  validateVerifyEmailOTP,
+  validateVerifyResetOTP,
+} from "../../../shared/middlewares/validate";
 import { authenticate } from "../../../shared/middlewares/auth";
 
 const router = Router();
@@ -29,7 +38,11 @@ router.post("/register", validateRegister, register);
 
 router.post("/verify-email", validateVerifyEmailOTP, verifyEmailOTP);
 
-router.post("/resend-verification", validateResendVerification, resendVerificationEmail);
+router.post(
+  "/resend-verification",
+  validateResendVerification,
+  resendVerificationEmail,
+);
 
 router.post("/login", validateLogin, login);
 

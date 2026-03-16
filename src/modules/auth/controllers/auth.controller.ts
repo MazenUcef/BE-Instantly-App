@@ -23,12 +23,12 @@ import CategoryModel from "../../category/models/Category.model";
 import { publishToQueue } from "../../../shared/config/rabbitmq";
 import GovernmentModel from "../../government/models/Government.model";
 
-
-
 export const register = async (req: Request, res: Response) => {
   try {
+    console.log("req.body:", req.body);
+    console.log("req.files:", req.files);
     const data = req.body;
-
+    console.log("data", data);
     const existingUser = await UserModel.findOne({
       $or: [{ email: data.email }, { phoneNumber: data.phoneNumber }],
     });
@@ -80,7 +80,10 @@ export const register = async (req: Request, res: Response) => {
         );
       }
 
-      if (!Array.isArray(data.governmentIds) || data.governmentIds.length === 0) {
+      if (
+        !Array.isArray(data.governmentIds) ||
+        data.governmentIds.length === 0
+      ) {
         throw new AppError(
           "At least one government/service area is required for supplier",
           400,
@@ -88,9 +91,9 @@ export const register = async (req: Request, res: Response) => {
       }
 
       const governments = await GovernmentModel.find({
-        _id: { $in: data.governmentIds }
+        _id: { $in: data.governmentIds },
       });
-      
+
       if (governments.length !== data.governmentIds.length) {
         throw new AppError("One or more governments are invalid", 400);
       }
@@ -148,6 +151,12 @@ export const register = async (req: Request, res: Response) => {
       email: user.email,
     });
   } catch (error: any) {
+    console.error("Registration error details:", {
+      message: error.message,
+      stack: error.stack,
+      statusCode: error.statusCode,
+    });
+
     res.status(error.statusCode || 500).json({
       success: false,
       message: error.message,
@@ -247,23 +256,22 @@ export const login = async (req: Request, res: Response) => {
     let categoryData = null;
     let governmentsData: any[] = [];
 
-    
     if (user.governmentIds && user.governmentIds.length > 0) {
       const governmentObjectIds = user.governmentIds.map(
-        id => new mongoose.Types.ObjectId(id.toString())
+        (id) => new mongoose.Types.ObjectId(id.toString()),
       );
-      
+
       const governments = await GovernmentModel.find({
         _id: { $in: governmentObjectIds },
-        isActive: true
+        isActive: true,
       }).sort({ order: 1 });
 
-      governmentsData = governments.map(gov => ({
+      governmentsData = governments.map((gov) => ({
         id: gov._id,
         name: gov.name,
         nameAr: gov.nameAr,
         country: gov.country,
-        order: gov.order
+        order: gov.order,
       }));
     }
 
@@ -625,8 +633,11 @@ export const resendVerificationEmail = async (req: Request, res: Response) => {
 
 export const switchRole = async (req: any, res: Response) => {
   console.log("switchRole - req.user:", req.user);
-    console.log("switchRole - req.body:", req.body);
-    console.log("switchRole - req.headers.content-type:", req.headers['content-type']);
+  console.log("switchRole - req.body:", req.body);
+  console.log(
+    "switchRole - req.headers.content-type:",
+    req.headers["content-type"],
+  );
   const { userId, role, sessionId } = req.user;
   const { targetRole, categoryId, jobs, governmentIds } = req.body;
   console.log("req.body", req.body);
@@ -662,7 +673,10 @@ export const switchRole = async (req: any, res: Response) => {
 
     if (!user.jobTitles || user.jobTitles.length === 0) {
       if (!Array.isArray(jobs) || jobs.length === 0) {
-        throw new AppError("At least one job title is required for supplier", 400);
+        throw new AppError(
+          "At least one job title is required for supplier",
+          400,
+        );
       }
       user.jobTitles = jobs;
     }
@@ -675,9 +689,9 @@ export const switchRole = async (req: any, res: Response) => {
         );
       }
       const governments = await GovernmentModel.find({
-        _id: { $in: governmentIds }
+        _id: { $in: governmentIds },
       });
-      
+
       if (governments.length !== governmentIds.length) {
         throw new AppError("One or more governments are invalid", 400);
       }
@@ -788,7 +802,9 @@ export const updateUser = async (req: Request, res: Response) => {
   await user.save();
 
   const { password, ...safeUser } = user.toObject();
-  res.status(200).json({ message: "User updated", data: safeUser });
+  res
+    .status(200)
+    .json({ message: "User updated successfully", data: safeUser });
 };
 
 export const deleteUser = async (req: Request, res: Response) => {

@@ -1,16 +1,19 @@
-import { RequestHandler } from "express";
+import { Request, Response, NextFunction, RequestHandler } from "express";
 import { body, param, query, validationResult } from "express-validator";
 import upload from "../config/multer";
 
-const handleValidationErrors: RequestHandler = (req, res, next) => {
+export const handleValidationErrors = (req: Request, res: Response, next: NextFunction) => {
   const errors = validationResult(req);
   if (!errors.isEmpty()) {
-    res.status(400).json({ errors: errors.array() });
-    return;
+    console.log(errors.array());
+    return res.status(400).json({
+      success: false,
+      errors: errors.array(),
+      message: 'Validation failed'
+    });
   }
   next();
 };
-
 
 export const validateRegister: RequestHandler[] = [
   upload.fields([{ name: "profilePicture", maxCount: 1 }]),
@@ -67,7 +70,9 @@ export const validateRegister: RequestHandler[] = [
     .withMessage("Phone number must be a string")
     .trim()
     .matches(/^01[0-9]{9}$/)
-    .withMessage("Phone number must be a valid Egyptian number (11 digits starting with 01)"),
+    .withMessage(
+      "Phone number must be a valid Egyptian number (11 digits starting with 01)",
+    ),
 
   body("password")
     .notEmpty()
@@ -160,7 +165,7 @@ export const validateRegister: RequestHandler[] = [
  * VERIFY PHONE OTP
  * =========================
  */
-export const validateVerifyPhoneOTP: RequestHandler[] = [ 
+export const validateVerifyPhoneOTP: RequestHandler[] = [
   body("phoneNumber")
     .notEmpty()
     .withMessage("Phone number is required")
@@ -373,19 +378,25 @@ export const validateVerifyResetOTP = [
   handleValidationErrors,
 ];
 
-
 export const validateCreateOrder: RequestHandler[] = [
-  body('address')
-    .notEmpty().withMessage('Address is required')
-    .isString().withMessage('Address must be a string'),
+  body("address")
+    .notEmpty()
+    .withMessage("Address is required")
+    .isString()
+    .withMessage("Address must be a string"),
 
-  body('description')
-    .notEmpty().withMessage('Description is required')
-    .isString().withMessage('Description must be a string'),
+  body("description")
+    .notEmpty()
+    .withMessage("Description is required")
+    .isString()
+    .withMessage("Description must be a string"),
 
-  body('categoryId')
-    .notEmpty().withMessage('Category ID is required')
-    .isString().withMessage('Category ID must be a string'),
+  body("categoryId")
+    .notEmpty()
+    .withMessage("Category ID is required")
+    .isString()
+    .withMessage("Category ID must be a string"),
 
-  handleValidationErrors
+  handleValidationErrors,
 ];
+
