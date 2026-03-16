@@ -4,10 +4,14 @@ import { ITokenPayload } from '../shared/types';
 declare global {
   namespace Express {
     interface Request {
-      user?: ITokenPayload;
+      user: ITokenPayload;
       files?: any;
       file?: any;
     }
+  }
+  
+  interface Error {
+    status?: number;
   }
 }
 

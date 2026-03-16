@@ -1,12 +1,12 @@
-import { Response } from "express";
+import { Response, Request } from "express";
 import Message from "../models/Message.model";
 import { getIO } from "../../../shared/config/socket";
 import JobSession from "../../session/models/session.model";
 
-export const sendMessage = async (req: any, res: Response) => {
+export const sendMessage = async (req: Request, res: Response) => {
   try {
     const { sessionId, message } = req.body;
-    const senderId = req.user.userId;
+    const senderId = (req as any).user.userId;
 
     const session = await JobSession.findById(sessionId);
 
@@ -49,10 +49,10 @@ export const sendMessage = async (req: any, res: Response) => {
   }
 };
 
-export const getMessagesBySession = async (req: any, res: Response) => {
+export const getMessagesBySession = async (req: Request, res: Response) => {
   try {
     const { sessionId } = req.params;
-    const userId = req.user.userId;
+    const userId = (req as any).user.userId;
 
     const session = await JobSession.findById(sessionId);
 

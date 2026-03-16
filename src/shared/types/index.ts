@@ -59,5 +59,5 @@ export interface ITokenPayload {
 }
 
 export interface IAuthRequest extends Request {
-  user?: ITokenPayload;
+  user: ITokenPayload;
 }

@@ -32,26 +32,26 @@ exports.server = server;
 app.use((0, morgan_1.default)("dev"));
 app.use((0, helmet_1.default)());
 app.use((0, cors_1.default)({
-    origin: '*',
-    methods: ['GET', 'POST', 'PUT', 'DELETE'],
-    allowedHeaders: ['Content-Type', 'Authorization']
+    origin: "*",
+    methods: ["GET", "POST", "PUT", "DELETE"],
+    allowedHeaders: ["Content-Type", "Authorization"],
 }));
 const limiter = (0, express_rate_limit_1.default)({
     windowMs: 15 * 60 * 1000,
-    max: process.env.NODE_ENV === 'production' ? 100 : 1000,
+    max: process.env.NODE_ENV === "production" ? 100 : 1000,
 });
 app.use(limiter);
-app.use(express_1.default.json({ limit: '10mb' }));
+app.use(express_1.default.json({ limit: "10mb" }));
 app.use(express_1.default.urlencoded({ extended: true }));
-app.get('/health', (req, res) => {
+app.get("/health", (req, res) => {
     res.status(200).json({
-        message: 'Server is running',
+        message: "Server is running",
         timestamp: new Date().toISOString(),
-        environment: process.env.NODE_ENV || 'development'
+        environment: process.env.NODE_ENV || "development",
     });
 });
-app.use('/api/auth', auth_routes_1.default);
-app.use('/api/categories', category_routes_1.default);
+app.use("/api/auth", auth_routes_1.default);
+app.use("/api/categories", category_routes_1.default);
 app.use("/api/governments", Government_routes_1.default);
 app.use("/api/chat", chat_routes_1.default);
 app.use("/api/notifications", notifications_routes_1.default);
@@ -64,7 +64,7 @@ app.use((err, req, res, next) => {
         return next(err);
     console.error(err.stack);
     res.status(err.status || 500).json({
-        message: err.message || 'Something went wrong!',
-        error: process.env.NODE_ENV === 'development' ? err.message : undefined
+        message: err.message || "Something went wrong!",
+        error: process.env.NODE_ENV === "development" ? err.message : undefined,
     });
 });
