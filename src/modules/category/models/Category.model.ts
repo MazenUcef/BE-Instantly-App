@@ -9,7 +9,10 @@ const CategorySchema = new Schema(
       trim: true,
     },
     description: String,
-    icon: String,
+    image: {
+      type: String,
+      required: false,
+    },
     jobs: {
       type: [String],
       default: [],
