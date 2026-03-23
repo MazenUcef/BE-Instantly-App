@@ -235,21 +235,25 @@ export const getActiveOrdersByCategory = async (req: any, res: Response) => {
 
     if (!supplierGovernmentIds || supplierGovernmentIds.length === 0) {
       return res.json({
-        type: "available_orders",
-        count: 0,
-        orders: [],
         message: "No active orders for now",
+        ordersWithOffers: [],
+        availableOrders: [],
+        count: {
+          ordersWithOffers: 0,
+          availableOrders: 0,
+        },
       });
     }
 
-    const activeOffer = await OfferModel.findOne({
+    // Check if supplier already has an accepted offer (active job)
+    const activeAcceptedOffer = await OfferModel.findOne({
       supplierId: userId,
-      status: { $in: ["pending", "accepted"] },
+      status: "accepted",
     }).sort({ createdAt: -1 });
 
-    if (activeOffer) {
+    if (activeAcceptedOffer) {
       const activeOrder = await buildSupplierOrderPayload(
-        activeOffer.orderId.toString(),
+        activeAcceptedOffer.orderId.toString(),
       );
 
       if (!activeOrder) {
@@ -261,26 +265,54 @@ export const getActiveOrdersByCategory = async (req: any, res: Response) => {
       return res.json({
         type: "active_job",
         order: activeOrder,
+        activeAcceptedOffer: true,
       });
     }
 
-    const orders = await Order.find({
+    // Get all pending orders that match supplier's category and government
+    const allPendingOrders = await Order.find({
       categoryId: supplierCategoryId,
       governmentId: { $in: supplierGovernmentIds },
       status: "pending",
       customerId: { $ne: userId },
     }).sort({ createdAt: -1 });
 
-    const enrichedOrders = await Promise.all(
-      orders.map((order) => buildSupplierOrderPayload(order._id.toString())),
+    // Get all pending offers from this supplier
+    const supplierPendingOffers = await OfferModel.find({
+      supplierId: userId,
+      status: "pending",
+    }).select("orderId");
+
+    const orderIdsWithOffers = supplierPendingOffers.map((offer) =>
+      offer.orderId.toString(),
     );
 
-    const safeOrders = enrichedOrders.filter(Boolean);
+    // Separate orders into two arrays
+    const ordersWithOffers: any[] = [];
+    const availableOrders: any[] = [];
+
+    for (const order of allPendingOrders) {
+      const enrichedOrder = await buildSupplierOrderPayload(
+        order._id.toString(),
+      );
+      if (enrichedOrder) {
+        if (orderIdsWithOffers.includes(order._id.toString())) {
+          ordersWithOffers.push(enrichedOrder);
+        } else {
+          availableOrders.push(enrichedOrder);
+        }
+      }
+    }
 
     return res.json({
-      type: "available_orders",
-      count: safeOrders.length,
-      orders: safeOrders,
+      type: "orders_list",
+      ordersWithOffers,
+      availableOrders,
+      count: {
+        ordersWithOffers: ordersWithOffers.length,
+        availableOrders: availableOrders.length,
+        total: ordersWithOffers.length + availableOrders.length,
+      },
     });
   } catch (error) {
     console.log("Get active orders error:", error);
