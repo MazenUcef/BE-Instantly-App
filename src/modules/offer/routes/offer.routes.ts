@@ -7,6 +7,7 @@ import {
   acceptOrderDirect,
   deleteOffer,
   getAcceptedOfferHistory,
+  getSupplierPendingOffers,
 } from "../controllers/offer.controller";
 import { authenticate, authorize } from "../../../shared/middlewares/auth";
 
@@ -39,6 +40,13 @@ router.post(
   authenticate,
   authorize("supplier"),
   acceptOrderDirect,
+);
+
+router.get(
+  "/supplier/pending",
+  authenticate,
+  authorize("supplier"),
+  getSupplierPendingOffers
 );
 
 export default router;
