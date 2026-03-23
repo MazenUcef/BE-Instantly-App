@@ -1,6 +1,10 @@
 import { Request, Response } from "express";
 import UserModel from "../../auth/models/User.model";
-import { getIO } from "../../../shared/config/socket";
+import {
+  getIO,
+  socketEvents,
+  socketRooms,
+} from "../../../shared/config/socket";
 import { publishNotification } from "../../notification/notification.publisher";
 import OrderModel from "../../order/models/Order.model";
 import sessionModel from "../../session/models/session.model";
@@ -75,7 +79,10 @@ export const createOffer = async (req: any, res: Response) => {
       await existingOffer.save();
 
       const io = getIO();
-      io.to(`user_${customerId}`).emit("offer_updated", existingOffer);
+      io.to(socketRooms.user(customerId)).emit(
+        socketEvents.OFFER_UPDATED,
+        existingOffer,
+      );
 
       await publishNotification({
         userId: customerId,
@@ -111,7 +118,7 @@ export const createOffer = async (req: any, res: Response) => {
     });
 
     const io = getIO();
-    io.to(`user_${customerId}`).emit("new_offer", offer);
+    io.to(socketRooms.user(customerId)).emit(socketEvents.OFFER_NEW, offer);
 
     await publishNotification({
       userId: customerId,
@@ -166,7 +173,7 @@ export const acceptOffer = async (req: any, res: Response) => {
 
     let session = null;
     const order = await OrderModel.findById(offer.orderId);
-    
+
     if (order) {
       session = await sessionModel.create({
         orderId: offer.orderId,
@@ -181,15 +188,18 @@ export const acceptOffer = async (req: any, res: Response) => {
         orderId: offer.orderId,
         offerId: offer._id,
         customerId: order.customerId,
-        supplierId: offer.supplierId
+        supplierId: offer.supplierId,
       });
     }
 
     const io = getIO();
-    io.to(`user_${offer.supplierId}`).emit("offer_accepted", {
-      ...offer.toObject(),
-      sessionId: session?._id
-    });
+    io.to(socketRooms.user(offer.supplierId.toString())).emit(
+      socketEvents.OFFER_ACCEPTED,
+      {
+        ...offer.toObject(),
+        sessionId: session?._id,
+      },
+    );
 
     await publishNotification({
       userId: offer.supplierId.toString(),
@@ -207,14 +217,16 @@ export const acceptOffer = async (req: any, res: Response) => {
     res.json({
       message: "Offer accepted and session created",
       offer,
-      session: session ? {
-        _id: session._id,
-        orderId: session.orderId,
-        offerId: session.offerId,
-        customerId: session.customerId,
-        supplierId: session.supplierId,
-        status: session.status
-      } : null,
+      session: session
+        ? {
+            _id: session._id,
+            orderId: session.orderId,
+            offerId: session.offerId,
+            customerId: session.customerId,
+            supplierId: session.supplierId,
+            status: session.status,
+          }
+        : null,
     });
   } catch (error) {
     console.error("Accept offer error:", error);
@@ -237,9 +249,12 @@ export const rejectOffer = async (req: Request, res: Response) => {
     }
 
     const io = getIO();
-    io.to(`user_${offer.supplierId}`).emit("offer_rejected", {
-      orderId: offer.orderId,
-    });
+    io.to(socketRooms.user(offer.supplierId.toString())).emit(
+      socketEvents.OFFER_REJECTED,
+      {
+        orderId: offer.orderId,
+      },
+    );
     await publishNotification({
       userId: offer.supplierId.toString(),
       type: "OFFER_REJECTED",
@@ -333,15 +348,18 @@ export const acceptOrderDirect = async (req: any, res: Response) => {
       orderId,
       offerId: offer._id,
       customerId: order.customerId,
-      supplierId
+      supplierId,
     });
 
     const io = getIO();
-    io.to(`user_${order.customerId}`).emit("order_accepted_direct", {
-      orderId,
-      supplierId,
-      sessionId: session._id,
-    });
+    io.to(socketRooms.user(order.customerId.toString())).emit(
+      socketEvents.ORDER_ACCEPTED_DIRECT,
+      {
+        orderId,
+        supplierId,
+        sessionId: session._id,
+      },
+    );
 
     await publishNotification({
       userId: order.customerId.toString(),
@@ -367,7 +385,7 @@ export const acceptOrderDirect = async (req: any, res: Response) => {
         offerId: session.offerId,
         customerId: session.customerId,
         supplierId: session.supplierId,
-        status: session.status
+        status: session.status,
       },
       order: {
         _id: order._id,
@@ -390,7 +408,6 @@ export const getAcceptedOfferHistory = async (req: any, res: Response) => {
     const limitNum = parseInt(limit as string);
     const skip = (pageNum - 1) * limitNum;
 
-
     const filter: any = {
       supplierId,
       status: "accepted",
@@ -412,11 +429,11 @@ export const getAcceptedOfferHistory = async (req: any, res: Response) => {
         try {
           const order = await OrderModel.findById(offer.orderId);
           const session = await sessionModel.findOne({ offerId: offer._id });
-          
+
           let customer = null;
           if (order) {
             customer = await UserModel.findById(order.customerId).select(
-              "-password -refreshToken -biometrics"
+              "-password -refreshToken -biometrics",
             );
           }
 
@@ -462,13 +479,12 @@ export const getAcceptedOfferHistory = async (req: any, res: Response) => {
     });
   } catch (error) {
     console.error("Get accepted offer history error:", error);
-    res.status(500).json({ 
+    res.status(500).json({
       success: false,
-      message: "Failed to fetch offer history" 
+      message: "Failed to fetch offer history",
     });
   }
 };
-
 
 const calculateTotalEarnings = async (supplierId: string) => {
   try {
@@ -517,39 +533,40 @@ export const deleteOffer = async (req: any, res: Response) => {
 
     const offer = await OfferModel.findById(id);
     if (!offer) {
-      return res.status(404).json({ 
+      return res.status(404).json({
         success: false,
-        message: "Offer not found" 
+        message: "Offer not found",
       });
     }
 
     if (offer.supplierId.toString() !== supplierId) {
-      return res.status(403).json({ 
+      return res.status(403).json({
         success: false,
-        message: "You are not authorized to delete this offer" 
+        message: "You are not authorized to delete this offer",
       });
     }
 
     const order = await OrderModel.findById(offer.orderId);
     if (!order) {
-      return res.status(404).json({ 
+      return res.status(404).json({
         success: false,
-        message: "Associated order not found" 
+        message: "Associated order not found",
       });
     }
 
     if (order.status !== "pending" && order.status !== "in_progress") {
-      return res.status(400).json({ 
+      return res.status(400).json({
         success: false,
-        message: `Cannot delete offer when order is ${order.status}` 
+        message: `Cannot delete offer when order is ${order.status}`,
       });
     }
 
     const session = await sessionModel.findOne({ offerId: offer._id });
     if (session && session.status !== "cancelled") {
-      return res.status(400).json({ 
+      return res.status(400).json({
         success: false,
-        message: "Cannot delete offer with active session. Please cancel the session first." 
+        message:
+          "Cannot delete offer with active session. Please cancel the session first.",
       });
     }
 
@@ -564,11 +581,14 @@ export const deleteOffer = async (req: any, res: Response) => {
 
     if (offerDetails.status === "pending") {
       const io = getIO();
-      io.to(`user_${order.customerId}`).emit("offer_deleted", {
-        offerId: offerDetails.id,
-        orderId: offerDetails.orderId,
-        message: "A supplier has withdrawn their offer",
-      });
+      io.to(socketRooms.user(order.customerId.toString())).emit(
+        socketEvents.OFFER_DELETED,
+        {
+          offerId: offerDetails.id,
+          orderId: offerDetails.orderId,
+          message: "A supplier has withdrawn their offer",
+        },
+      );
 
       await publishNotification({
         userId: order.customerId.toString(),
@@ -582,9 +602,7 @@ export const deleteOffer = async (req: any, res: Response) => {
       });
     }
 
-
     if (offerDetails.status === "accepted") {
-      
       await OrderModel.findByIdAndUpdate(offer.orderId, {
         status: "pending",
       });
@@ -600,7 +618,12 @@ export const deleteOffer = async (req: any, res: Response) => {
       });
 
       const io = getIO();
-      io.to(`category_${order.categoryId}_government_${order.governmentId}`).emit("order_available_again", {
+      io.to(
+        socketRooms.supplierOrders(
+          order.categoryId.toString(),
+          order.governmentId.toString(),
+        ),
+      ).emit(socketEvents.ORDER_AVAILABLE_AGAIN, {
         orderId: offerDetails.orderId,
         message: "A previously accepted order is now available for new offers",
       });
@@ -619,21 +642,21 @@ export const deleteOffer = async (req: any, res: Response) => {
 
     res.json({
       success: true,
-      message: offerDetails.status === "accepted" 
-        ? "Accepted offer withdrawn successfully. Order is now available for new offers."
-        : "Offer deleted successfully",
+      message:
+        offerDetails.status === "accepted"
+          ? "Accepted offer withdrawn successfully. Order is now available for new offers."
+          : "Offer deleted successfully",
       data: {
         deletedOfferId: offerDetails.id,
         orderId: offerDetails.orderId,
         orderStatus: order.status === "in_progress" ? "in_progress" : "pending",
       },
     });
-
   } catch (error) {
     console.error("Delete offer error:", error);
-    res.status(500).json({ 
+    res.status(500).json({
       success: false,
-      message: "Failed to delete offer" 
+      message: "Failed to delete offer",
     });
   }
 };

@@ -22,6 +22,14 @@ export const socketEvents = {
   ORDER_NEW: "order:new",
   ORDER_UPDATED: "order:updated",
   ORDER_DELETED: "order:deleted",
+  ORDER_AVAILABLE_AGAIN: "order:available_again",
+  ORDER_ACCEPTED_DIRECT: "order:accepted_direct",
+
+  OFFER_NEW: "offer:new",
+  OFFER_UPDATED: "offer:updated",
+  OFFER_ACCEPTED: "offer:accepted",
+  OFFER_REJECTED: "offer:rejected",
+  OFFER_DELETED: "offer:deleted",
 };
 
 export const initSocket = (server: any) => {
