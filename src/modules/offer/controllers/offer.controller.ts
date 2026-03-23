@@ -47,7 +47,6 @@ export const createOffer = async (req: any, res: Response) => {
       });
     }
 
-    // Check if supplier already has an ACCEPTED offer (active job) - but allow multiple pending offers
     const activeAcceptedJob = await OfferModel.findOne({
       supplierId,
       status: "accepted",
@@ -60,7 +59,6 @@ export const createOffer = async (req: any, res: Response) => {
       });
     }
 
-    // Check if supplier already has a pending offer for this specific order
     const existingOffer = await OfferModel.findOne({
       supplierId,
       orderId,
@@ -70,7 +68,6 @@ export const createOffer = async (req: any, res: Response) => {
     const expiresAt = null;
 
     if (existingOffer) {
-      // Update existing offer instead of creating duplicate
       existingOffer.type = type;
       existingOffer.amount = amount;
       existingOffer.timeRange = timeRange;
@@ -85,6 +82,20 @@ export const createOffer = async (req: any, res: Response) => {
         socketEvents.OFFER_UPDATED,
         existingOffer,
       );
+
+      io.to(socketRooms.user(supplierId)).emit("supplier:offer_updated", {
+        offer: existingOffer,
+        timestamp: new Date(),
+      });
+
+      const pendingCount = await OfferModel.countDocuments({
+        supplierId,
+        status: "pending",
+      });
+      io.to(socketRooms.user(supplierId)).emit("supplier:pending_count_update", {
+        pendingOffersCount: pendingCount,
+        timestamp: new Date(),
+      });
 
       await publishNotification({
         userId: customerId,
@@ -108,7 +119,6 @@ export const createOffer = async (req: any, res: Response) => {
       });
     }
 
-    // Allow creating new offer for different order
     const offer = await OfferModel.create({
       orderId,
       type,
@@ -122,6 +132,20 @@ export const createOffer = async (req: any, res: Response) => {
 
     const io = getIO();
     io.to(socketRooms.user(customerId)).emit(socketEvents.OFFER_NEW, offer);
+
+    io.to(socketRooms.user(supplierId)).emit("supplier:offer_created", {
+      offer: offer,
+      timestamp: new Date(),
+    });
+
+    const pendingCount = await OfferModel.countDocuments({
+      supplierId,
+      status: "pending",
+    });
+    io.to(socketRooms.user(supplierId)).emit("supplier:pending_count_update", {
+      pendingOffersCount: pendingCount,
+      timestamp: new Date(),
+    });
 
     await publishNotification({
       userId: customerId,
@@ -141,11 +165,7 @@ export const createOffer = async (req: any, res: Response) => {
 
     res.status(201).json({
       message: "Offer created",
-      offer,
-      activeOffersCount: await OfferModel.countDocuments({
-        supplierId,
-        status: "pending",
-      }),
+      offer
     });
   } catch (error) {
     console.error("Create offer error:", error);
@@ -169,8 +189,6 @@ export const acceptOffer = async (req: any, res: Response) => {
       });
     }
 
-    // WITHDRAW ALL ACTIVE PENDING OFFERS FROM THIS SUPPLIER
-    // Find all pending offers from this supplier (excluding the accepted one)
     const supplierPendingOffers = await OfferModel.find({
       supplierId: offer.supplierId,
       status: "pending",
@@ -181,12 +199,10 @@ export const acceptOffer = async (req: any, res: Response) => {
       `Withdrawing ${supplierPendingOffers.length} pending offers from supplier ${offer.supplierId}`,
     );
 
-    // Withdraw all pending offers
     for (const pendingOffer of supplierPendingOffers) {
       pendingOffer.status = "rejected";
       await pendingOffer.save();
 
-      // Notify customers about withdrawn offers
       const orderForWithdrawnOffer = await OrderModel.findById(
         pendingOffer.orderId,
       );
@@ -217,18 +233,15 @@ export const acceptOffer = async (req: any, res: Response) => {
       }
     }
 
-    // Update the accepted order status
     await OrderModel.findByIdAndUpdate(offer.orderId, {
       status: "in_progress",
     });
 
-    // Reject other offers for this specific order
     await OfferModel.updateMany(
       { orderId: offer.orderId, _id: { $ne: offer._id } },
       { status: "rejected" },
     );
 
-    // Create session
     let session = null;
     const order = await OrderModel.findById(offer.orderId);
 
@@ -252,7 +265,6 @@ export const acceptOffer = async (req: any, res: Response) => {
 
     const io = getIO();
 
-    // Notify the supplier about their accepted offer and withdrawn offers
     io.to(socketRooms.user(offer.supplierId.toString())).emit(
       socketEvents.OFFER_ACCEPTED,
       {
@@ -261,6 +273,55 @@ export const acceptOffer = async (req: any, res: Response) => {
         withdrawnOffersCount: supplierPendingOffers.length,
         withdrawnOffers: supplierPendingOffers.map((o) => o.orderId),
       },
+    );
+
+    for (const pendingOffer of supplierPendingOffers) {
+      io.to(socketRooms.user(offer.supplierId.toString())).emit(
+        "supplier:offer_withdrawn",
+        {
+          offerId: pendingOffer._id,
+          orderId: pendingOffer.orderId,
+          reason: "accepted_another_job",
+          acceptedOrderId: offer.orderId,
+          timestamp: new Date(),
+        }
+      );
+    }
+
+    const remainingPendingCount = await OfferModel.countDocuments({
+      supplierId: offer.supplierId,
+      status: "pending",
+    });
+    io.to(socketRooms.user(offer.supplierId.toString())).emit(
+      "supplier:pending_count_update",
+      {
+        pendingOffersCount: remainingPendingCount,
+        hasActiveJob: true,
+        timestamp: new Date(),
+      }
+    );
+
+    const updatedPendingOffers = await OfferModel.find({
+      supplierId: offer.supplierId,
+      status: "pending",
+    }).sort({ createdAt: -1 });
+    
+    const enrichedPendingOffers = await Promise.all(
+      updatedPendingOffers.map(async (pendingOffer) => {
+        const orderDetails = await OrderModel.findById(pendingOffer.orderId).lean();
+        return {
+          ...pendingOffer.toObject(),
+          order: orderDetails || null,
+        };
+      })
+    );
+    
+    io.to(socketRooms.user(offer.supplierId.toString())).emit(
+      "supplier:pending_offers_list",
+      {
+        offers: enrichedPendingOffers,
+        timestamp: new Date(),
+      }
     );
 
     await publishNotification({
@@ -747,8 +808,9 @@ export const deleteOffer = async (req: any, res: Response) => {
 
     await offer.deleteOne();
 
+    const io = getIO();
+
     if (offerDetails.status === "pending") {
-      const io = getIO();
       io.to(socketRooms.user(order.customerId.toString())).emit(
         socketEvents.OFFER_DELETED,
         {
@@ -757,6 +819,42 @@ export const deleteOffer = async (req: any, res: Response) => {
           message: "A supplier has withdrawn their offer",
         },
       );
+
+      io.to(socketRooms.user(supplierId)).emit("supplier:offer_withdrawn", {
+        offerId: offerDetails.id,
+        orderId: offerDetails.orderId,
+        reason: "user_deleted",
+        timestamp: new Date(),
+      });
+
+      const pendingCount = await OfferModel.countDocuments({
+        supplierId,
+        status: "pending",
+      });
+      io.to(socketRooms.user(supplierId)).emit("supplier:pending_count_update", {
+        pendingOffersCount: pendingCount,
+        timestamp: new Date(),
+      });
+
+      const updatedPendingOffers = await OfferModel.find({
+        supplierId,
+        status: "pending",
+      }).sort({ createdAt: -1 });
+      
+      const enrichedPendingOffers = await Promise.all(
+        updatedPendingOffers.map(async (pendingOffer) => {
+          const orderDetails = await OrderModel.findById(pendingOffer.orderId).lean();
+          return {
+            ...pendingOffer.toObject(),
+            order: orderDetails || null,
+          };
+        })
+      );
+      
+      io.to(socketRooms.user(supplierId)).emit("supplier:pending_offers_list", {
+        offers: enrichedPendingOffers,
+        timestamp: new Date(),
+      });
 
       await publishNotification({
         userId: order.customerId.toString(),
@@ -785,7 +883,6 @@ export const deleteOffer = async (req: any, res: Response) => {
         },
       });
 
-      const io = getIO();
       io.to(
         socketRooms.supplierOrders(
           order.categoryId.toString(),
@@ -794,6 +891,12 @@ export const deleteOffer = async (req: any, res: Response) => {
       ).emit(socketEvents.ORDER_AVAILABLE_AGAIN, {
         orderId: offerDetails.orderId,
         message: "A previously accepted order is now available for new offers",
+      });
+
+      io.to(socketRooms.user(supplierId)).emit("supplier:accepted_offer_withdrawn", {
+        offerId: offerDetails.id,
+        orderId: offerDetails.orderId,
+        timestamp: new Date(),
       });
 
       await publishNotification({
@@ -825,6 +928,74 @@ export const deleteOffer = async (req: any, res: Response) => {
     res.status(500).json({
       success: false,
       message: "Failed to delete offer",
+    });
+  }
+};
+
+export const getSupplierPendingOffers = async (req: any, res: Response) => {
+  try {
+    const supplierId = req.user.userId;
+    const { page = 1, limit = 20 } = req.query;
+
+    const pageNum = parseInt(page as string);
+    const limitNum = parseInt(limit as string);
+    const skip = (pageNum - 1) * limitNum;
+
+    const pendingOffers = await OfferModel.find({
+      supplierId,
+      status: "pending",
+    })
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limitNum);
+
+    const total = await OfferModel.countDocuments({
+      supplierId,
+      status: "pending",
+    });
+
+    const enrichedOffers = await Promise.all(
+      pendingOffers.map(async (offer) => {
+        try {
+          const order = await OrderModel.findById(offer.orderId)
+            .select("-__v")
+            .lean();
+
+          return {
+            ...offer.toObject(),
+            order: order || null,
+          };
+        } catch (err) {
+          console.error("Failed to fetch order details:", err);
+          return offer;
+        }
+      })
+    );
+
+    res.json({
+      success: true,
+      data: {
+        offers: enrichedOffers,
+        pagination: {
+          total,
+          page: pageNum,
+          limit: limitNum,
+          pages: Math.ceil(total / limitNum),
+        },
+        stats: {
+          totalPending: total,
+          hasActiveJob: await OfferModel.exists({
+            supplierId,
+            status: "accepted",
+          }),
+        },
+      },
+    });
+  } catch (error) {
+    console.error("Get supplier pending offers error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch pending offers",
     });
   }
 };

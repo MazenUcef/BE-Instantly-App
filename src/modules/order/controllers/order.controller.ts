@@ -245,7 +245,6 @@ export const getActiveOrdersByCategory = async (req: any, res: Response) => {
       });
     }
 
-    // Check if supplier already has an accepted offer (active job)
     const activeAcceptedOffer = await OfferModel.findOne({
       supplierId: userId,
       status: "accepted",
@@ -269,7 +268,6 @@ export const getActiveOrdersByCategory = async (req: any, res: Response) => {
       });
     }
 
-    // Get all pending orders that match supplier's category and government
     const allPendingOrders = await Order.find({
       categoryId: supplierCategoryId,
       governmentId: { $in: supplierGovernmentIds },
@@ -277,7 +275,6 @@ export const getActiveOrdersByCategory = async (req: any, res: Response) => {
       customerId: { $ne: userId },
     }).sort({ createdAt: -1 });
 
-    // Get all pending offers from this supplier
     const supplierPendingOffers = await OfferModel.find({
       supplierId: userId,
       status: "pending",
@@ -287,7 +284,6 @@ export const getActiveOrdersByCategory = async (req: any, res: Response) => {
       offer.orderId.toString(),
     );
 
-    // Separate orders into two arrays
     const ordersWithOffers: any[] = [];
     const availableOrders: any[] = [];
 
