@@ -127,7 +127,7 @@ export const createOffer = async (req: any, res: Response) => {
 
       return res.status(200).json({
         message: "Offer updated and resent",
-        offer: existingOffer,
+        offer: enrichedOffer,
       });
     }
 
@@ -189,7 +189,7 @@ export const createOffer = async (req: any, res: Response) => {
 
     res.status(201).json({
       message: "Offer created",
-      offer,
+      offer: enrichedOffer,
     });
   } catch (error) {
     console.error("Create offer error:", error);
