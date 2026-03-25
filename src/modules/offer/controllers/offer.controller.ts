@@ -78,9 +78,18 @@ export const createOffer = async (req: any, res: Response) => {
       await existingOffer.save();
 
       const io = getIO();
+      const supplier = await UserModel.findById(supplierId).select(
+        "-password -refreshToken -biometrics",
+      );
+
+      const enrichedOffer = {
+        ...existingOffer.toObject(),
+        supplier: supplier || null,
+      };
+
       io.to(socketRooms.user(customerId)).emit(
         socketEvents.OFFER_UPDATED,
-        existingOffer,
+        enrichedOffer,
       );
 
       io.to(socketRooms.user(supplierId)).emit("supplier:offer_updated", {
@@ -92,10 +101,13 @@ export const createOffer = async (req: any, res: Response) => {
         supplierId,
         status: "pending",
       });
-      io.to(socketRooms.user(supplierId)).emit("supplier:pending_count_update", {
-        pendingOffersCount: pendingCount,
-        timestamp: new Date(),
-      });
+      io.to(socketRooms.user(supplierId)).emit(
+        "supplier:pending_count_update",
+        {
+          pendingOffersCount: pendingCount,
+          timestamp: new Date(),
+        },
+      );
 
       await publishNotification({
         userId: customerId,
@@ -130,8 +142,20 @@ export const createOffer = async (req: any, res: Response) => {
       status: "pending",
     });
 
+    const supplier = await UserModel.findById(supplierId).select(
+      "-password -refreshToken -biometrics",
+    );
+
+    const enrichedOffer = {
+      ...offer.toObject(),
+      supplier: supplier || null,
+    };
+
     const io = getIO();
-    io.to(socketRooms.user(customerId)).emit(socketEvents.OFFER_NEW, offer);
+    io.to(socketRooms.user(customerId)).emit(
+      socketEvents.OFFER_NEW,
+      enrichedOffer,
+    );
 
     io.to(socketRooms.user(supplierId)).emit("supplier:offer_created", {
       offer: offer,
@@ -165,7 +189,7 @@ export const createOffer = async (req: any, res: Response) => {
 
     res.status(201).json({
       message: "Offer created",
-      offer
+      offer,
     });
   } catch (error) {
     console.error("Create offer error:", error);
@@ -284,7 +308,7 @@ export const acceptOffer = async (req: any, res: Response) => {
           reason: "accepted_another_job",
           acceptedOrderId: offer.orderId,
           timestamp: new Date(),
-        }
+        },
       );
     }
 
@@ -298,30 +322,32 @@ export const acceptOffer = async (req: any, res: Response) => {
         pendingOffersCount: remainingPendingCount,
         hasActiveJob: true,
         timestamp: new Date(),
-      }
+      },
     );
 
     const updatedPendingOffers = await OfferModel.find({
       supplierId: offer.supplierId,
       status: "pending",
     }).sort({ createdAt: -1 });
-    
+
     const enrichedPendingOffers = await Promise.all(
       updatedPendingOffers.map(async (pendingOffer) => {
-        const orderDetails = await OrderModel.findById(pendingOffer.orderId).lean();
+        const orderDetails = await OrderModel.findById(
+          pendingOffer.orderId,
+        ).lean();
         return {
           ...pendingOffer.toObject(),
           order: orderDetails || null,
         };
-      })
+      }),
     );
-    
+
     io.to(socketRooms.user(offer.supplierId.toString())).emit(
       "supplier:pending_offers_list",
       {
         offers: enrichedPendingOffers,
         timestamp: new Date(),
-      }
+      },
     );
 
     await publishNotification({
@@ -419,9 +445,9 @@ export const getOffersByOrder = async (req: Request, res: Response) => {
       offers.map(async (offer) => {
         try {
           const supplier = await UserModel.findById(offer.supplierId).select(
-            "-password -refreshToken -biometrics"
+            "-password -refreshToken -biometrics",
           );
-          
+
           return {
             ...offer.toObject(),
             supplier: supplier || null,
@@ -430,7 +456,7 @@ export const getOffersByOrder = async (req: Request, res: Response) => {
           console.error("Failed to fetch supplier details:", err);
           return offer;
         }
-      })
+      }),
     );
 
     res.json({ offers: enrichedOffers });
@@ -831,26 +857,31 @@ export const deleteOffer = async (req: any, res: Response) => {
         supplierId,
         status: "pending",
       });
-      io.to(socketRooms.user(supplierId)).emit("supplier:pending_count_update", {
-        pendingOffersCount: pendingCount,
-        timestamp: new Date(),
-      });
+      io.to(socketRooms.user(supplierId)).emit(
+        "supplier:pending_count_update",
+        {
+          pendingOffersCount: pendingCount,
+          timestamp: new Date(),
+        },
+      );
 
       const updatedPendingOffers = await OfferModel.find({
         supplierId,
         status: "pending",
       }).sort({ createdAt: -1 });
-      
+
       const enrichedPendingOffers = await Promise.all(
         updatedPendingOffers.map(async (pendingOffer) => {
-          const orderDetails = await OrderModel.findById(pendingOffer.orderId).lean();
+          const orderDetails = await OrderModel.findById(
+            pendingOffer.orderId,
+          ).lean();
           return {
             ...pendingOffer.toObject(),
             order: orderDetails || null,
           };
-        })
+        }),
       );
-      
+
       io.to(socketRooms.user(supplierId)).emit("supplier:pending_offers_list", {
         offers: enrichedPendingOffers,
         timestamp: new Date(),
@@ -893,11 +924,14 @@ export const deleteOffer = async (req: any, res: Response) => {
         message: "A previously accepted order is now available for new offers",
       });
 
-      io.to(socketRooms.user(supplierId)).emit("supplier:accepted_offer_withdrawn", {
-        offerId: offerDetails.id,
-        orderId: offerDetails.orderId,
-        timestamp: new Date(),
-      });
+      io.to(socketRooms.user(supplierId)).emit(
+        "supplier:accepted_offer_withdrawn",
+        {
+          offerId: offerDetails.id,
+          orderId: offerDetails.orderId,
+          timestamp: new Date(),
+        },
+      );
 
       await publishNotification({
         userId: supplierId,
@@ -969,7 +1003,7 @@ export const getSupplierPendingOffers = async (req: any, res: Response) => {
           console.error("Failed to fetch order details:", err);
           return offer;
         }
-      })
+      }),
     );
 
     res.json({
