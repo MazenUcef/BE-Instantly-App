@@ -187,10 +187,13 @@ export const deleteOrder = async (req: any, res: Response) => {
     const io = getIO();
 
     for (const offer of pendingOffers) {
-      io.to(`user_${offer.supplierId}`).emit("offer_rejected", {
-        orderId: order._id,
-        reason: "Order deleted by customer",
-      });
+      io.to(socketRooms.user(offer.supplierId.toString())).emit(
+        socketEvents.OFFER_REJECTED,
+        {
+          orderId: order._id.toString(),
+          reason: "Order deleted by customer",
+        },
+      );
 
       await publishNotification({
         userId: offer.supplierId.toString(),

@@ -298,7 +298,21 @@ export const acceptOffer = async (req: any, res: Response) => {
         withdrawnOffers: supplierPendingOffers.map((o) => o.orderId),
       },
     );
-
+    if (order?.customerId) {
+      io.to(socketRooms.user(order.customerId.toString())).emit(
+        socketEvents.OFFER_ACCEPTED,
+        {
+          offerId: offer._id.toString(),
+          orderId: offer.orderId.toString(),
+          supplierId: offer.supplierId.toString(),
+          sessionId: session?._id?.toString(),
+          order: {
+            _id: order._id.toString(),
+            status: "in_progress",
+          },
+        },
+      );
+    }
     for (const pendingOffer of supplierPendingOffers) {
       io.to(socketRooms.user(offer.supplierId.toString())).emit(
         "supplier:offer_withdrawn",
