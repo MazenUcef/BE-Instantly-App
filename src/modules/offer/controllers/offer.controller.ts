@@ -414,35 +414,84 @@ export const rejectOffer = async (req: Request, res: Response) => {
     const { id } = req.params;
 
     const offer = await OfferModel.findOneAndUpdate(
-      { _id: id, status: "pending" },
-      { status: "rejected" },
+      { _id: id, status: 'pending' },
+      { status: 'rejected' },
       { new: true },
     );
 
     if (!offer) {
-      return res.status(404).json({ message: "Offer not found" });
+      return res.status(404).json({ message: 'Offer not found' });
     }
 
+    const order = await OrderModel.findById(offer.orderId).lean();
+
     const io = getIO();
+
     io.to(socketRooms.user(offer.supplierId.toString())).emit(
       socketEvents.OFFER_REJECTED,
       {
-        orderId: offer.orderId,
+        offerId: offer._id.toString(),
+        orderId: offer.orderId.toString(),
+        order: order || null,
+        reason: 'customer_rejected',
+        timestamp: new Date(),
       },
     );
+
+    const pendingCount = await OfferModel.countDocuments({
+      supplierId: offer.supplierId,
+      status: 'pending',
+    });
+
+    io.to(socketRooms.user(offer.supplierId.toString())).emit(
+      'supplier:pending_count_update',
+      {
+        pendingOffersCount: pendingCount,
+        hasActiveJob: false,
+        timestamp: new Date(),
+      },
+    );
+
+    const updatedPendingOffers = await OfferModel.find({
+      supplierId: offer.supplierId,
+      status: 'pending',
+    }).sort({ createdAt: -1 });
+
+    const enrichedPendingOffers = await Promise.all(
+      updatedPendingOffers.map(async pendingOffer => {
+        const orderDetails = await OrderModel.findById(
+          pendingOffer.orderId,
+        ).lean();
+
+        return {
+          ...pendingOffer.toObject(),
+          order: orderDetails || null,
+        };
+      }),
+    );
+
+    io.to(socketRooms.user(offer.supplierId.toString())).emit(
+      'supplier:pending_offers_list',
+      {
+        offers: enrichedPendingOffers,
+        timestamp: new Date(),
+      },
+    );
+
     await publishNotification({
       userId: offer.supplierId.toString(),
-      type: "OFFER_REJECTED",
-      title: "Offer Rejected",
+      type: 'OFFER_REJECTED',
+      title: 'Offer Rejected',
       message: `Your offer for order #${offer.orderId} has been rejected`,
       data: {
         offerId: offer._id.toString(),
         orderId: offer.orderId.toString(),
       },
     });
-    res.json({ message: "Offer rejected", offer });
+
+    res.json({ message: 'Offer rejected', offer });
   } catch (error) {
-    res.status(500).json({ message: "Failed to reject offer" });
+    res.status(500).json({ message: 'Failed to reject offer' });
   }
 };
 
@@ -483,8 +532,6 @@ export const acceptOrderDirect = async (req: any, res: Response) => {
   try {
     const { orderId } = req.params;
     const supplierId = req.user.userId;
-
-    // Check if supplier already has an accepted offer (active job)
     const existingAccepted = await OfferModel.findOne({
       supplierId,
       status: "accepted",
@@ -504,8 +551,6 @@ export const acceptOrderDirect = async (req: any, res: Response) => {
         .status(400)
         .json({ message: "Order already taken or not found" });
     }
-
-    // Get all pending offers from this supplier BEFORE creating the new accepted offer
     const supplierPendingOffers = await OfferModel.find({
       supplierId,
       status: "pending",
@@ -514,8 +559,6 @@ export const acceptOrderDirect = async (req: any, res: Response) => {
     console.log(
       `Found ${supplierPendingOffers.length} pending offers to withdraw`,
     );
-
-    // Create the accepted offer
     const offer = await OfferModel.create({
       orderId,
       supplierId,
@@ -524,16 +567,13 @@ export const acceptOrderDirect = async (req: any, res: Response) => {
       status: "accepted",
     });
 
-    // Update order status
     order.status = "in_progress";
     await order.save();
 
-    // WITHDRAW ALL PENDING OFFERS (excluding the one we just created, but it's not pending anyway)
     for (const pendingOffer of supplierPendingOffers) {
       pendingOffer.status = "rejected";
       await pendingOffer.save();
 
-      // Notify customers about withdrawn offers
       const orderForWithdrawnOffer = await OrderModel.findById(
         pendingOffer.orderId,
       );
@@ -563,14 +603,11 @@ export const acceptOrderDirect = async (req: any, res: Response) => {
         });
       }
     }
-
-    // Reject other offers for this specific order
     await OfferModel.updateMany(
       { orderId, _id: { $ne: offer._id } },
       { status: "rejected" },
     );
 
-    // Create session
     const session = await sessionModel.create({
       orderId,
       offerId: offer._id,
@@ -589,7 +626,6 @@ export const acceptOrderDirect = async (req: any, res: Response) => {
 
     const io = getIO();
 
-    // Notify the customer
     io.to(socketRooms.user(order.customerId.toString())).emit(
       socketEvents.ORDER_ACCEPTED_DIRECT,
       {
@@ -612,8 +648,6 @@ export const acceptOrderDirect = async (req: any, res: Response) => {
         sessionId: session._id.toString(),
       },
     });
-
-    // Notify the supplier about withdrawn offers
     if (supplierPendingOffers.length > 0) {
       await publishNotification({
         userId: supplierId,
@@ -630,7 +664,6 @@ export const acceptOrderDirect = async (req: any, res: Response) => {
         },
       });
 
-      // Also emit socket event to supplier
       io.to(socketRooms.user(supplierId.toString())).emit("OFFERS_WITHDRAWN", {
         acceptedOrderId: orderId,
         withdrawnOffersCount: supplierPendingOffers.length,
