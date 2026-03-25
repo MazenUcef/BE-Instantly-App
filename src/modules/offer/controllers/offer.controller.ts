@@ -424,7 +424,6 @@ export const rejectOffer = async (req: Request, res: Response) => {
     }
 
     const order = await OrderModel.findById(offer.orderId).lean();
-
     const io = getIO();
 
     io.to(socketRooms.user(offer.supplierId.toString())).emit(
@@ -478,6 +477,20 @@ export const rejectOffer = async (req: Request, res: Response) => {
       },
     );
 
+    if (order?.categoryId && order?.governmentId) {
+      io.to(
+        socketRooms.supplierOrders(
+          order.categoryId.toString(),
+          order.governmentId.toString(),
+        ),
+      ).emit(socketEvents.ORDER_AVAILABLE_AGAIN, {
+        orderId: offer.orderId.toString(),
+        order,
+        reason: 'customer_rejected',
+        timestamp: new Date(),
+      });
+    }
+
     await publishNotification({
       userId: offer.supplierId.toString(),
       type: 'OFFER_REJECTED',
@@ -491,6 +504,7 @@ export const rejectOffer = async (req: Request, res: Response) => {
 
     res.json({ message: 'Offer rejected', offer });
   } catch (error) {
+    console.error('Reject offer error:', error);
     res.status(500).json({ message: 'Failed to reject offer' });
   }
 };
