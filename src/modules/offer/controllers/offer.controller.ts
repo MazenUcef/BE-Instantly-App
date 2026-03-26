@@ -10,6 +10,7 @@ import OrderModel from "../../order/models/Order.model";
 import sessionModel from "../../session/models/session.model";
 import OfferModel from "../models/Offer.model";
 import mongoose from "mongoose";
+import { buildSupplierOrderPayload } from "../../../shared/utils/buildSupplierOrderPayload";
 
 export const createOffer = async (req: any, res: Response) => {
   try {
@@ -414,16 +415,15 @@ export const rejectOffer = async (req: Request, res: Response) => {
     const { id } = req.params;
 
     const offer = await OfferModel.findOneAndUpdate(
-      { _id: id, status: 'pending' },
-      { status: 'rejected' },
+      { _id: id, status: "pending" },
+      { status: "rejected" },
       { new: true },
     );
 
     if (!offer) {
-      return res.status(404).json({ message: 'Offer not found' });
+      return res.status(404).json({ message: "Offer not found" });
     }
 
-    const order = await OrderModel.findById(offer.orderId).lean();
     const io = getIO();
 
     io.to(socketRooms.user(offer.supplierId.toString())).emit(
@@ -431,33 +431,31 @@ export const rejectOffer = async (req: Request, res: Response) => {
       {
         offerId: offer._id.toString(),
         orderId: offer.orderId.toString(),
-        order: order || null,
-        reason: 'customer_rejected',
+        reason: "customer_rejected",
         timestamp: new Date(),
       },
     );
 
     const pendingCount = await OfferModel.countDocuments({
       supplierId: offer.supplierId,
-      status: 'pending',
+      status: "pending",
     });
 
     io.to(socketRooms.user(offer.supplierId.toString())).emit(
-      'supplier:pending_count_update',
+      socketEvents.SUPPLIER_PENDING_COUNT_UPDATE,
       {
         pendingOffersCount: pendingCount,
         hasActiveJob: false,
         timestamp: new Date(),
       },
     );
-
     const updatedPendingOffers = await OfferModel.find({
       supplierId: offer.supplierId,
-      status: 'pending',
+      status: "pending",
     }).sort({ createdAt: -1 });
 
     const enrichedPendingOffers = await Promise.all(
-      updatedPendingOffers.map(async pendingOffer => {
+      updatedPendingOffers.map(async (pendingOffer) => {
         const orderDetails = await OrderModel.findById(
           pendingOffer.orderId,
         ).lean();
@@ -470,31 +468,38 @@ export const rejectOffer = async (req: Request, res: Response) => {
     );
 
     io.to(socketRooms.user(offer.supplierId.toString())).emit(
-      'supplier:pending_offers_list',
+      socketEvents.SUPPLIER_PENDING_OFFERS_LIST,
       {
         offers: enrichedPendingOffers,
         timestamp: new Date(),
       },
     );
 
-    if (order?.categoryId && order?.governmentId) {
-      io.to(
-        socketRooms.supplierOrders(
-          order.categoryId.toString(),
-          order.governmentId.toString(),
-        ),
-      ).emit(socketEvents.ORDER_AVAILABLE_AGAIN, {
-        orderId: offer.orderId.toString(),
-        order,
-        reason: 'customer_rejected',
-        timestamp: new Date(),
-      });
+    const supplierOrderPayload = await buildSupplierOrderPayload(
+      offer.orderId.toString(),
+    );
+
+    if (supplierOrderPayload) {
+      const categoryId = supplierOrderPayload.category?._id?.toString?.();
+      const governmentId = supplierOrderPayload.government?._id?.toString?.();
+
+      if (categoryId && governmentId) {
+        io.to(socketRooms.supplierOrders(categoryId, governmentId)).emit(
+          socketEvents.ORDER_AVAILABLE_AGAIN,
+          {
+            orderId: offer.orderId.toString(),
+            order: supplierOrderPayload,
+            reason: "customer_rejected",
+            timestamp: new Date(),
+          },
+        );
+      }
     }
 
     await publishNotification({
       userId: offer.supplierId.toString(),
-      type: 'OFFER_REJECTED',
-      title: 'Offer Rejected',
+      type: "OFFER_REJECTED",
+      title: "Offer Rejected",
       message: `Your offer for order #${offer.orderId} has been rejected`,
       data: {
         offerId: offer._id.toString(),
@@ -502,10 +507,13 @@ export const rejectOffer = async (req: Request, res: Response) => {
       },
     });
 
-    res.json({ message: 'Offer rejected', offer });
+    return res.json({
+      message: "Offer rejected",
+      offer,
+    });
   } catch (error) {
-    console.error('Reject offer error:', error);
-    res.status(500).json({ message: 'Failed to reject offer' });
+    console.error("Reject offer error:", error);
+    return res.status(500).json({ message: "Failed to reject offer" });
   }
 };
 
@@ -546,6 +554,7 @@ export const acceptOrderDirect = async (req: any, res: Response) => {
   try {
     const { orderId } = req.params;
     const supplierId = req.user.userId;
+
     const existingAccepted = await OfferModel.findOne({
       supplierId,
       status: "accepted",
@@ -565,6 +574,7 @@ export const acceptOrderDirect = async (req: any, res: Response) => {
         .status(400)
         .json({ message: "Order already taken or not found" });
     }
+
     const supplierPendingOffers = await OfferModel.find({
       supplierId,
       status: "pending",
@@ -573,6 +583,7 @@ export const acceptOrderDirect = async (req: any, res: Response) => {
     console.log(
       `Found ${supplierPendingOffers.length} pending offers to withdraw`,
     );
+
     const offer = await OfferModel.create({
       orderId,
       supplierId,
@@ -584,6 +595,9 @@ export const acceptOrderDirect = async (req: any, res: Response) => {
     order.status = "in_progress";
     await order.save();
 
+    const io = getIO();
+
+    // withdraw this supplier's other pending offers
     for (const pendingOffer of supplierPendingOffers) {
       pendingOffer.status = "rejected";
       await pendingOffer.save();
@@ -591,8 +605,8 @@ export const acceptOrderDirect = async (req: any, res: Response) => {
       const orderForWithdrawnOffer = await OrderModel.findById(
         pendingOffer.orderId,
       );
+
       if (orderForWithdrawnOffer && orderForWithdrawnOffer.customerId) {
-        const io = getIO();
         io.to(
           socketRooms.user(orderForWithdrawnOffer.customerId.toString()),
         ).emit(socketEvents.OFFER_DELETED, {
@@ -617,6 +631,8 @@ export const acceptOrderDirect = async (req: any, res: Response) => {
         });
       }
     }
+
+    // reject all other offers on this accepted order
     await OfferModel.updateMany(
       { orderId, _id: { $ne: offer._id } },
       { status: "rejected" },
@@ -638,17 +654,111 @@ export const acceptOrderDirect = async (req: any, res: Response) => {
       supplierId,
     });
 
-    const io = getIO();
+    let customerOrderPayload: any = {
+      _id: order._id,
+      status: order.status,
+      customerId: order.customerId,
+      supplierId,
+      requestedPrice: order.requestedPrice,
+      categoryId: order.categoryId,
+      governmentId: order.governmentId,
+      acceptedOffer: {
+        _id: offer._id,
+        type: offer.type,
+        amount: offer.amount,
+        status: offer.status,
+        supplierId: offer.supplierId,
+      },
+      session: {
+        _id: session._id,
+        orderId: session.orderId,
+        offerId: session.offerId,
+        customerId: session.customerId,
+        supplierId: session.supplierId,
+        status: session.status,
+      },
+    };
+
+    let supplierCurrentOrderPayload: any = {
+      _id: order._id,
+      status: order.status,
+      customerId: order.customerId,
+      supplierId,
+      requestedPrice: order.requestedPrice,
+      categoryId: order.categoryId,
+      governmentId: order.governmentId,
+      acceptedOffer: {
+        _id: offer._id,
+        type: offer.type,
+        amount: offer.amount,
+        status: offer.status,
+        supplierId: offer.supplierId,
+      },
+      session: {
+        _id: session._id,
+        orderId: session.orderId,
+        offerId: session.offerId,
+        customerId: session.customerId,
+        supplierId: session.supplierId,
+        status: session.status,
+      },
+    };
+
+    const acceptedDirectPayload = {
+      orderId: order._id.toString(),
+      supplierId: supplierId.toString(),
+      offerId: offer._id.toString(),
+      sessionId: session._id.toString(),
+      withdrawnOffersCount: supplierPendingOffers.length,
+      order: customerOrderPayload,
+      supplierOrder: supplierCurrentOrderPayload,
+      session: {
+        _id: session._id,
+        orderId: session.orderId,
+        offerId: session.offerId,
+        customerId: session.customerId,
+        supplierId: session.supplierId,
+        status: session.status,
+      },
+      timestamp: new Date(),
+    };
 
     io.to(socketRooms.user(order.customerId.toString())).emit(
       socketEvents.ORDER_ACCEPTED_DIRECT,
+      acceptedDirectPayload,
+    );
+
+    io.to(socketRooms.user(supplierId.toString())).emit(
+      socketEvents.ORDER_ACCEPTED_DIRECT,
       {
-        orderId,
-        supplierId,
-        sessionId: session._id,
-        withdrawnOffersCount: supplierPendingOffers.length,
+        ...acceptedDirectPayload,
+        order: supplierCurrentOrderPayload,
       },
     );
+
+    
+    const room = socketRooms.supplierOrders(
+      String(order.categoryId),
+      String(order.governmentId),
+    );
+    io.to(room).emit(socketEvents.ORDER_DELETED, {
+      orderId: String(order._id),
+    });
+
+
+    if (order.categoryId && order.governmentId) {
+      io.to(
+        socketRooms.supplierOrders(
+          order.categoryId.toString(),
+          order.governmentId.toString(),
+        ),
+      ).emit(socketEvents.ORDER_DELETED, {
+        orderId: order._id.toString(),
+        reason: "accepted_direct",
+        acceptedBySupplierId: supplierId.toString(),
+        timestamp: new Date(),
+      });
+    }
 
     await publishNotification({
       userId: order.customerId.toString(),
@@ -662,6 +772,7 @@ export const acceptOrderDirect = async (req: any, res: Response) => {
         sessionId: session._id.toString(),
       },
     });
+
     if (supplierPendingOffers.length > 0) {
       await publishNotification({
         userId: supplierId,
@@ -682,10 +793,11 @@ export const acceptOrderDirect = async (req: any, res: Response) => {
         acceptedOrderId: orderId,
         withdrawnOffersCount: supplierPendingOffers.length,
         withdrawnOrderIds: supplierPendingOffers.map((o) => o.orderId),
+        timestamp: new Date(),
       });
     }
 
-    res.json({
+    return res.json({
       message: "Order accepted successfully",
       offer: {
         ...offer.toObject(),
@@ -707,11 +819,12 @@ export const acceptOrderDirect = async (req: any, res: Response) => {
         _id: order._id,
         status: order.status,
         customerId: order.customerId,
+        supplierId,
       },
     });
   } catch (error) {
     console.error("Direct accept error:", error);
-    res.status(500).json({ message: "Failed to accept order" });
+    return res.status(500).json({ message: "Failed to accept order" });
   }
 };
 

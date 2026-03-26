@@ -31,13 +31,12 @@ export const socketEvents = {
   OFFER_REJECTED: "offer:rejected",
   OFFER_DELETED: "offer:deleted",
 
-  
-  SUPPLIER_OFFER_CREATED: 'supplier:offer_created',
-  SUPPLIER_OFFER_UPDATED: 'supplier:offer_updated',
-  SUPPLIER_OFFER_WITHDRAWN: 'supplier:offer_withdrawn',
-  SUPPLIER_PENDING_COUNT_UPDATE: 'supplier:pending_count_update',
-  SUPPLIER_PENDING_OFFERS_LIST: 'supplier:pending_offers_list',
-  SUPPLIER_ACCEPTED_OFFER_WITHDRAWN: 'supplier:accepted_offer_withdrawn',
+  SUPPLIER_OFFER_CREATED: "supplier:offer_created",
+  SUPPLIER_OFFER_UPDATED: "supplier:offer_updated",
+  SUPPLIER_OFFER_WITHDRAWN: "supplier:offer_withdrawn",
+  SUPPLIER_PENDING_COUNT_UPDATE: "supplier:pending_count_update",
+  SUPPLIER_PENDING_OFFERS_LIST: "supplier:pending_offers_list",
+  SUPPLIER_ACCEPTED_OFFER_WITHDRAWN: "supplier:accepted_offer_withdrawn",
 };
 
 export const initSocket = (server: any) => {
@@ -68,7 +67,7 @@ export const initSocket = (server: any) => {
     }
   });
 
-  io.on("connection", socket => {
+  io.on("connection", (socket) => {
     const user = socket.data.user as SocketUser | undefined;
 
     console.log("Socket connected:", socket.id, user?.userId);
@@ -94,6 +93,11 @@ export const initSocket = (server: any) => {
           socket.join(room);
           console.log(`Socket ${socket.id} joined ${room}`);
         }
+
+        socket.emit("supplier_rooms_joined", {
+          categoryId,
+          governmentIds,
+        });
       },
     );
 
@@ -116,7 +120,7 @@ export const initSocket = (server: any) => {
       },
     );
 
-    socket.on("disconnect", reason => {
+    socket.on("disconnect", (reason) => {
       console.log("Socket disconnected:", socket.id, reason);
     });
   });
