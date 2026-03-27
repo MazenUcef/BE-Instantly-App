@@ -1,6 +1,6 @@
 import { Response } from "express";
 import Message from "../models/Message.model";
-import { getIO } from "../../../shared/config/socket";
+import { getIO, socketEvents, socketRooms } from "../../../shared/config/socket";
 import JobSession from "../../session/models/session.model";
 
 export const sendMessage = async (req: any, res: Response) => {
@@ -40,12 +40,16 @@ export const sendMessage = async (req: any, res: Response) => {
     });
 
     const io = getIO();
-    io.to(`chat_${sessionId}`).emit("receive_message", newMessage);
 
-    res.status(201).json(newMessage);
+    io.to(socketRooms.chat(sessionId)).emit(socketEvents.MESSAGE_NEW, {
+      message: newMessage,
+      sessionId,
+    });
+
+    return res.status(201).json(newMessage);
   } catch (error) {
     console.error("Send message error:", error);
-    res.status(500).json({ message: "Failed to send message" });
+    return res.status(500).json({ message: "Failed to send message" });
   }
 };
 
