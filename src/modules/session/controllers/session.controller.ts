@@ -3,8 +3,13 @@ import JobSession from "../models/session.model";
 import Order from "../../order/models/Order.model";
 import Offer from "../../offer/models/Offer.model";
 import UserModel from "../../auth/models/User.model";
-import { getIO, socketEvents, socketRooms } from "../../../shared/config/socket";
+import {
+  getIO,
+  socketEvents,
+  socketRooms,
+} from "../../../shared/config/socket";
 import { publishNotification } from "../../notification/notification.publisher";
+import { buildSupplierOrderPayload } from "../../../shared/utils/buildSupplierOrderPayload";
 
 const populateSessionData = async (session: any) => {
   if (!session) return null;
@@ -133,6 +138,7 @@ export const getActiveSessionForUser = async (req: Request, res: Response) => {
 export const updateSessionStatus = async (req: any, res: Response) => {
   try {
     const { status } = req.body;
+    const actorUserId = req.user.userId;
 
     const allowedStatuses = [
       "on_the_way",
@@ -146,64 +152,196 @@ export const updateSessionStatus = async (req: any, res: Response) => {
       return res.status(400).json({ message: "Invalid status" });
     }
 
-    const session = await JobSession.findByIdAndUpdate(
-      req.params.id,
-      { status },
-      { new: true },
-    );
+    const session = await JobSession.findById(req.params.id);
 
     if (!session) {
       return res.status(404).json({ message: "Session not found" });
     }
 
-    const populatedSession = await populateSessionData(session);
+    if (status !== "cancelled") {
+      session.status = status;
+      await session.save();
+
+      const populatedSession = await populateSessionData(session);
+      const io = getIO();
+
+      io.to(socketRooms.chat(session._id.toString())).emit(
+        socketEvents.SESSION_STATUS_UPDATED,
+        {
+          sessionId: session._id.toString(),
+          status,
+          session: populatedSession,
+        },
+      );
+
+      io.to(socketRooms.user(session.customerId.toString())).emit(
+        socketEvents.SESSION_STATUS_UPDATED,
+        {
+          sessionId: session._id.toString(),
+          status,
+          session: populatedSession,
+        },
+      );
+
+      io.to(socketRooms.user(session.supplierId.toString())).emit(
+        socketEvents.SESSION_STATUS_UPDATED,
+        {
+          sessionId: session._id.toString(),
+          status,
+          session: populatedSession,
+        },
+      );
+
+      await publishNotification({
+        userId: session.customerId.toString(),
+        type: "SUPPLIER_STATUS_UPDATE",
+        title: "Supplier Status Update",
+        message: `Your supplier updated the session to "${status}" for order #${session.orderId}.`,
+        data: {
+          sessionId: session._id,
+          orderId: session.orderId,
+          supplierId: session.supplierId,
+          status,
+          session: populatedSession,
+        },
+      });
+
+      return res.json({
+        message: `Session status updated to "${status}"`,
+        session: populatedSession,
+      });
+    }
 
     const io = getIO();
+    const order = await Order.findById(session.orderId);
+    const offer = await Offer.findById(session.offerId);
+
+    if (!order) {
+      return res.status(404).json({ message: "Associated order not found" });
+    }
+
+    session.status = "cancelled";
+    await session.save();
+
+    const cancelledByCustomer = session.customerId.toString() === actorUserId;
+    const cancelledBySupplier = session.supplierId.toString() === actorUserId;
+
+    if (!cancelledByCustomer && !cancelledBySupplier) {
+      return res.status(403).json({ message: "Not allowed to cancel session" });
+    }
+
+    if (offer) {
+      offer.status = "rejected";
+      await offer.save();
+    }
+
+    if (cancelledByCustomer) {
+      await Offer.updateMany(
+        { orderId: order._id, status: "pending" },
+        { status: "rejected" },
+      );
+
+      await order.deleteOne();
+
+      io.to(
+        socketRooms.supplierOrders(
+          order.categoryId.toString(),
+          order.governmentId.toString(),
+        ),
+      ).emit(socketEvents.ORDER_DELETED, {
+        orderId: order._id.toString(),
+        reason: "customer_cancelled_session",
+        timestamp: new Date(),
+      });
+    }
+
+    if (cancelledBySupplier) {
+      order.status = "pending";
+      await order.save();
+
+      const supplierOrderPayload = await buildSupplierOrderPayload(
+        order._id.toString(),
+      );
+
+      if (supplierOrderPayload) {
+        io.to(
+          socketRooms.supplierOrders(
+            order.categoryId.toString(),
+            order.governmentId.toString(),
+          ),
+        ).emit(socketEvents.ORDER_AVAILABLE_AGAIN, {
+          orderId: order._id.toString(),
+          order: supplierOrderPayload,
+          reason: "supplier_cancelled_session",
+          timestamp: new Date(),
+        });
+      }
+    }
+
+    const populatedSession = await populateSessionData(session);
 
     io.to(socketRooms.chat(session._id.toString())).emit(
-      socketEvents.SESSION_STATUS_UPDATED,
+      socketEvents.SESSION_CANCELLED,
       {
         sessionId: session._id.toString(),
-        status,
+        cancelledBy: cancelledByCustomer ? "customer" : "supplier",
         session: populatedSession,
       },
     );
 
     io.to(socketRooms.user(session.customerId.toString())).emit(
-      socketEvents.SESSION_STATUS_UPDATED,
+      socketEvents.SESSION_CANCELLED,
       {
         sessionId: session._id.toString(),
-        status,
+        cancelledBy: cancelledByCustomer ? "customer" : "supplier",
         session: populatedSession,
       },
     );
 
     io.to(socketRooms.user(session.supplierId.toString())).emit(
-      socketEvents.SESSION_STATUS_UPDATED,
+      socketEvents.SESSION_CANCELLED,
       {
         sessionId: session._id.toString(),
-        status,
+        cancelledBy: cancelledByCustomer ? "customer" : "supplier",
         session: populatedSession,
       },
     );
 
     await publishNotification({
       userId: session.customerId.toString(),
-      type: "SUPPLIER_STATUS_UPDATE",
-      title: "Supplier Status Update",
-      message: `Your supplier updated the session to "${status}" for order #${session.orderId}.`,
+      type: "SESSION_CANCELLED",
+      title: "Session Cancelled",
+      message: cancelledByCustomer
+        ? `You cancelled the job for order #${session.orderId}.`
+        : `The supplier cancelled the job for order #${session.orderId}. Your order is available again.`,
       data: {
-        sessionId: session._id,
-        orderId: session.orderId,
-        supplierId: session.supplierId,
-        status,
-        session: populatedSession,
+        sessionId: session._id.toString(),
+        orderId: session.orderId.toString(),
+        cancelledBy: cancelledByCustomer ? "customer" : "supplier",
       },
     });
 
-    res.json({
-      message: `Session status updated to "${status}"`,
+    await publishNotification({
+      userId: session.supplierId.toString(),
+      type: "SESSION_CANCELLED",
+      title: "Session Cancelled",
+      message: cancelledByCustomer
+        ? `The customer cancelled the job for order #${session.orderId}.`
+        : `You cancelled the job for order #${session.orderId}.`,
+      data: {
+        sessionId: session._id.toString(),
+        orderId: session.orderId.toString(),
+        cancelledBy: cancelledByCustomer ? "customer" : "supplier",
+      },
+    });
+
+    return res.json({
+      message: cancelledByCustomer
+        ? "Session cancelled and order deleted"
+        : "Session cancelled and order returned to pending",
       session: populatedSession,
+      orderStatus: cancelledBySupplier ? "pending" : "deleted",
+      cancelledBy: cancelledByCustomer ? "customer" : "supplier",
     });
   } catch (error) {
     console.error("Update session status error:", error);
@@ -242,13 +380,31 @@ export const completeSession = async (req: Request, res: Response) => {
 
     const io = getIO();
 
-    io.to(`user_${session.customerId}`).emit("job_completed", {
-      sessionId: session._id,
-    });
+    const populatedSession = await populateSessionData(session);
 
-    io.to(`user_${session.supplierId}`).emit("job_completed", {
-      sessionId: session._id,
-    });
+    io.to(socketRooms.chat(session._id.toString())).emit(
+      socketEvents.SESSION_COMPLETED,
+      {
+        sessionId: session._id.toString(),
+        session: populatedSession,
+      },
+    );
+
+    io.to(socketRooms.user(session.customerId.toString())).emit(
+      socketEvents.SESSION_COMPLETED,
+      {
+        sessionId: session._id.toString(),
+        session: populatedSession,
+      },
+    );
+
+    io.to(socketRooms.user(session.supplierId.toString())).emit(
+      socketEvents.SESSION_COMPLETED,
+      {
+        sessionId: session._id.toString(),
+        session: populatedSession,
+      },
+    );
 
     await publishNotification({
       userId: session.customerId.toString(),
