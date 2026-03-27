@@ -7,21 +7,20 @@ import {
   completeSession,
   getSessionByOrder,
 } from "../controllers/session.controller";
+import { authenticate } from "../../../shared/middlewares/auth";
 
 const router = Router();
 
+router.post("/", authenticate, createSession);
 
-router.post("/", createSession);
+router.get("/active/:userId", authenticate, getActiveSessionForUser);
 
-router.get("/active/:userId", getActiveSessionForUser);
+router.get("/:id", authenticate, getSessionById);
 
-router.get("/:id", getSessionById);
+router.patch("/:id/status", authenticate, updateSessionStatus);
 
+router.patch("/:id/complete", authenticate, completeSession);
 
-router.patch("/:id/status", updateSessionStatus);
-
-router.patch("/:id/complete", completeSession);
-
-router.get("/by-order/:orderId", getSessionByOrder);
+router.get("/by-order/:orderId", authenticate, getSessionByOrder);
 
 export default router;

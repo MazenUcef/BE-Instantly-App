@@ -10,6 +10,7 @@ import {
 } from "../../../shared/config/socket";
 import { publishNotification } from "../../notification/notification.publisher";
 import { buildSupplierOrderPayload } from "../../../shared/utils/buildSupplierOrderPayload";
+import { log } from "node:console";
 
 const populateSessionData = async (session: any) => {
   if (!session) return null;
@@ -139,7 +140,6 @@ export const updateSessionStatus = async (req: any, res: Response) => {
   try {
     const { status } = req.body;
     const actorUserId = req.user.userId;
-
     const allowedStatuses = [
       "on_the_way",
       "arrived",
