@@ -3,21 +3,19 @@ import JobSession from "../models/session.model";
 import Order from "../../order/models/Order.model";
 import Offer from "../../offer/models/Offer.model";
 import UserModel from "../../auth/models/User.model";
-import { getIO } from "../../../shared/config/socket";
+import { getIO, socketEvents, socketRooms } from "../../../shared/config/socket";
 import { publishNotification } from "../../notification/notification.publisher";
-
-
 
 const populateSessionData = async (session: any) => {
   if (!session) return null;
-  
+
   const sessionObj = session.toObject ? session.toObject() : session;
-  
+
   try {
     const [order, offer, customer, supplier] = await Promise.all([
       Order.findById(session.orderId)
-        .populate('categoryId', 'name icon')
-        .populate('governmentId', 'name nameAr')
+        .populate("categoryId", "name icon")
+        .populate("governmentId", "name nameAr")
         .lean(),
       Offer.findById(session.offerId).lean(),
       UserModel.findById(session.customerId)
@@ -104,7 +102,7 @@ export const getSessionById = async (req: Request, res: Response) => {
     console.error("Get session by ID error:", error);
     res.status(500).json({ message: "Failed to fetch session" });
   }
-}; 
+};
 
 export const getActiveSessionForUser = async (req: Request, res: Response) => {
   try {
@@ -114,8 +112,7 @@ export const getActiveSessionForUser = async (req: Request, res: Response) => {
       $or: [{ customerId: userId }, { supplierId: userId }],
       status: { $nin: ["completed", "cancelled"] },
     });
-    console.log("session" , session);
-    
+    console.log("session", session);
 
     if (!session) {
       return res.json({ active: false });
@@ -163,11 +160,32 @@ export const updateSessionStatus = async (req: any, res: Response) => {
 
     const io = getIO();
 
-    io.to(`user_${session.customerId}`).emit("supplier_status_update", {
-      sessionId: session._id,
-      status,
-      session: populatedSession,
-    });
+    io.to(socketRooms.chat(session._id.toString())).emit(
+      socketEvents.SESSION_STATUS_UPDATED,
+      {
+        sessionId: session._id.toString(),
+        status,
+        session: populatedSession,
+      },
+    );
+
+    io.to(socketRooms.user(session.customerId.toString())).emit(
+      socketEvents.SESSION_STATUS_UPDATED,
+      {
+        sessionId: session._id.toString(),
+        status,
+        session: populatedSession,
+      },
+    );
+
+    io.to(socketRooms.user(session.supplierId.toString())).emit(
+      socketEvents.SESSION_STATUS_UPDATED,
+      {
+        sessionId: session._id.toString(),
+        status,
+        session: populatedSession,
+      },
+    );
 
     await publishNotification({
       userId: session.customerId.toString(),

@@ -231,8 +231,10 @@ export const acceptOffer = async (req: any, res: Response) => {
       const orderForWithdrawnOffer = await OrderModel.findById(
         pendingOffer.orderId,
       );
+
       if (orderForWithdrawnOffer && orderForWithdrawnOffer.customerId) {
         const io = getIO();
+
         io.to(
           socketRooms.user(orderForWithdrawnOffer.customerId.toString()),
         ).emit(socketEvents.OFFER_DELETED, {
@@ -290,6 +292,75 @@ export const acceptOffer = async (req: any, res: Response) => {
 
     const io = getIO();
 
+    const customerOrderPayload = order
+      ? {
+          _id: order._id.toString(),
+          status: "in_progress",
+          customerId: order.customerId.toString(),
+          supplierId: offer.supplierId.toString(),
+          requestedPrice: order.requestedPrice,
+          categoryId: order.categoryId,
+          governmentId: order.governmentId,
+          acceptedOffer: {
+            _id: offer._id.toString(),
+            type: offer.type,
+            amount: offer.amount,
+            status: "accepted",
+            supplierId: offer.supplierId.toString(),
+          },
+        }
+      : null;
+
+    const supplierOrderPayload = order
+      ? {
+          _id: order._id.toString(),
+          status: "in_progress",
+          customerId: order.customerId.toString(),
+          supplierId: offer.supplierId.toString(),
+          requestedPrice: order.requestedPrice,
+          categoryId: order.categoryId,
+          governmentId: order.governmentId,
+          acceptedOffer: {
+            _id: offer._id.toString(),
+            type: offer.type,
+            amount: offer.amount,
+            status: "accepted",
+            supplierId: offer.supplierId.toString(),
+          },
+        }
+      : null;
+
+    const sessionPayload = session
+      ? {
+          _id: session._id.toString(),
+          orderId: session.orderId.toString(),
+          offerId: session.offerId.toString(),
+          customerId: session.customerId.toString(),
+          supplierId: session.supplierId.toString(),
+          status: session.status,
+        }
+      : null;
+
+    const sessionCreatedPayload =
+      session && order
+        ? {
+            session: sessionPayload,
+            order: customerOrderPayload,
+            offer: {
+              _id: offer._id.toString(),
+              orderId: offer.orderId.toString(),
+              supplierId: offer.supplierId.toString(),
+              type: offer.type,
+              amount: offer.amount,
+              status: "accepted",
+            },
+            meta: {
+              trigger: "offer_accepted",
+              timestamp: new Date(),
+            },
+          }
+        : null;
+
     io.to(socketRooms.user(offer.supplierId.toString())).emit(
       socketEvents.OFFER_ACCEPTED,
       {
@@ -297,8 +368,11 @@ export const acceptOffer = async (req: any, res: Response) => {
         sessionId: session?._id,
         withdrawnOffersCount: supplierPendingOffers.length,
         withdrawnOffers: supplierPendingOffers.map((o) => o.orderId),
+        order: supplierOrderPayload,
+        session: sessionPayload,
       },
     );
+
     if (order?.customerId) {
       io.to(socketRooms.user(order.customerId.toString())).emit(
         socketEvents.OFFER_ACCEPTED,
@@ -311,12 +385,29 @@ export const acceptOffer = async (req: any, res: Response) => {
             _id: order._id.toString(),
             status: "in_progress",
           },
+          session: sessionPayload,
         },
       );
     }
+
+    if (sessionCreatedPayload && order?.customerId) {
+      io.to(socketRooms.user(order.customerId.toString())).emit(
+        socketEvents.SESSION_CREATED,
+        sessionCreatedPayload,
+      );
+
+      io.to(socketRooms.user(offer.supplierId.toString())).emit(
+        socketEvents.SESSION_CREATED,
+        {
+          ...sessionCreatedPayload,
+          order: supplierOrderPayload,
+        },
+      );
+    }
+
     for (const pendingOffer of supplierPendingOffers) {
       io.to(socketRooms.user(offer.supplierId.toString())).emit(
-        "supplier:offer_withdrawn",
+        socketEvents.SUPPLIER_OFFER_WITHDRAWN,
         {
           offerId: pendingOffer._id,
           orderId: pendingOffer.orderId,
@@ -331,8 +422,9 @@ export const acceptOffer = async (req: any, res: Response) => {
       supplierId: offer.supplierId,
       status: "pending",
     });
+
     io.to(socketRooms.user(offer.supplierId.toString())).emit(
-      "supplier:pending_count_update",
+      socketEvents.SUPPLIER_PENDING_COUNT_UPDATE,
       {
         pendingOffersCount: remainingPendingCount,
         hasActiveJob: true,
@@ -350,6 +442,7 @@ export const acceptOffer = async (req: any, res: Response) => {
         const orderDetails = await OrderModel.findById(
           pendingOffer.orderId,
         ).lean();
+
         return {
           ...pendingOffer.toObject(),
           order: orderDetails || null,
@@ -358,7 +451,7 @@ export const acceptOffer = async (req: any, res: Response) => {
     );
 
     io.to(socketRooms.user(offer.supplierId.toString())).emit(
-      "supplier:pending_offers_list",
+      socketEvents.SUPPLIER_PENDING_OFFERS_LIST,
       {
         offers: enrichedPendingOffers,
         timestamp: new Date(),
@@ -386,27 +479,19 @@ export const acceptOffer = async (req: any, res: Response) => {
       },
     });
 
-    res.json({
+    return res.json({
       message: "Offer accepted and session created",
       offer,
       withdrawnOffers: {
         count: supplierPendingOffers.length,
         orders: supplierPendingOffers.map((o) => o.orderId),
       },
-      session: session
-        ? {
-            _id: session._id,
-            orderId: session.orderId,
-            offerId: session.offerId,
-            customerId: session.customerId,
-            supplierId: session.supplierId,
-            status: session.status,
-          }
-        : null,
+      session: sessionPayload,
+      order: customerOrderPayload,
     });
   } catch (error) {
     console.error("Accept offer error:", error);
-    res.status(500).json({ message: "Failed to accept offer" });
+    return res.status(500).json({ message: "Failed to accept offer" });
   }
 };
 
@@ -597,7 +682,6 @@ export const acceptOrderDirect = async (req: any, res: Response) => {
 
     const io = getIO();
 
-    // withdraw this supplier's other pending offers
     for (const pendingOffer of supplierPendingOffers) {
       pendingOffer.status = "rejected";
       await pendingOffer.save();
@@ -632,7 +716,6 @@ export const acceptOrderDirect = async (req: any, res: Response) => {
       }
     }
 
-    // reject all other offers on this accepted order
     await OfferModel.updateMany(
       { orderId, _id: { $ne: offer._id } },
       { status: "rejected" },
@@ -654,54 +737,63 @@ export const acceptOrderDirect = async (req: any, res: Response) => {
       supplierId,
     });
 
-    let customerOrderPayload: any = {
-      _id: order._id,
+    const customerOrderPayload = {
+      _id: order._id.toString(),
       status: order.status,
-      customerId: order.customerId,
-      supplierId,
+      customerId: order.customerId.toString(),
+      supplierId: supplierId.toString(),
       requestedPrice: order.requestedPrice,
       categoryId: order.categoryId,
       governmentId: order.governmentId,
       acceptedOffer: {
-        _id: offer._id,
+        _id: offer._id.toString(),
         type: offer.type,
         amount: offer.amount,
         status: offer.status,
-        supplierId: offer.supplierId,
+        supplierId: offer.supplierId.toString(),
       },
       session: {
-        _id: session._id,
-        orderId: session.orderId,
-        offerId: session.offerId,
-        customerId: session.customerId,
-        supplierId: session.supplierId,
+        _id: session._id.toString(),
+        orderId: session.orderId.toString(),
+        offerId: session.offerId.toString(),
+        customerId: session.customerId.toString(),
+        supplierId: session.supplierId.toString(),
         status: session.status,
       },
     };
 
-    let supplierCurrentOrderPayload: any = {
-      _id: order._id,
+    const supplierCurrentOrderPayload = {
+      _id: order._id.toString(),
       status: order.status,
-      customerId: order.customerId,
-      supplierId,
+      customerId: order.customerId.toString(),
+      supplierId: supplierId.toString(),
       requestedPrice: order.requestedPrice,
       categoryId: order.categoryId,
       governmentId: order.governmentId,
       acceptedOffer: {
-        _id: offer._id,
+        _id: offer._id.toString(),
         type: offer.type,
         amount: offer.amount,
         status: offer.status,
-        supplierId: offer.supplierId,
+        supplierId: offer.supplierId.toString(),
       },
       session: {
-        _id: session._id,
-        orderId: session.orderId,
-        offerId: session.offerId,
-        customerId: session.customerId,
-        supplierId: session.supplierId,
+        _id: session._id.toString(),
+        orderId: session.orderId.toString(),
+        offerId: session.offerId.toString(),
+        customerId: session.customerId.toString(),
+        supplierId: session.supplierId.toString(),
         status: session.status,
       },
+    };
+
+    const sessionPayload = {
+      _id: session._id.toString(),
+      orderId: session.orderId.toString(),
+      offerId: session.offerId.toString(),
+      customerId: session.customerId.toString(),
+      supplierId: session.supplierId.toString(),
+      status: session.status,
     };
 
     const acceptedDirectPayload = {
@@ -712,15 +804,25 @@ export const acceptOrderDirect = async (req: any, res: Response) => {
       withdrawnOffersCount: supplierPendingOffers.length,
       order: customerOrderPayload,
       supplierOrder: supplierCurrentOrderPayload,
-      session: {
-        _id: session._id,
-        orderId: session.orderId,
-        offerId: session.offerId,
-        customerId: session.customerId,
-        supplierId: session.supplierId,
-        status: session.status,
-      },
+      session: sessionPayload,
       timestamp: new Date(),
+    };
+
+    const sessionCreatedPayload = {
+      session: sessionPayload,
+      order: customerOrderPayload,
+      offer: {
+        _id: offer._id.toString(),
+        orderId: offer.orderId.toString(),
+        supplierId: offer.supplierId.toString(),
+        type: offer.type,
+        amount: offer.amount,
+        status: offer.status,
+      },
+      meta: {
+        trigger: "order_accepted_direct",
+        timestamp: new Date(),
+      },
     };
 
     io.to(socketRooms.user(order.customerId.toString())).emit(
@@ -736,15 +838,27 @@ export const acceptOrderDirect = async (req: any, res: Response) => {
       },
     );
 
-    
+    io.to(socketRooms.user(order.customerId.toString())).emit(
+      socketEvents.SESSION_CREATED,
+      sessionCreatedPayload,
+    );
+
+    io.to(socketRooms.user(supplierId.toString())).emit(
+      socketEvents.SESSION_CREATED,
+      {
+        ...sessionCreatedPayload,
+        order: supplierCurrentOrderPayload,
+      },
+    );
+
     const room = socketRooms.supplierOrders(
       String(order.categoryId),
       String(order.governmentId),
     );
+
     io.to(room).emit(socketEvents.ORDER_DELETED, {
       orderId: String(order._id),
     });
-
 
     if (order.categoryId && order.governmentId) {
       io.to(
@@ -807,19 +921,12 @@ export const acceptOrderDirect = async (req: any, res: Response) => {
         count: supplierPendingOffers.length,
         orders: supplierPendingOffers.map((o) => o.orderId),
       },
-      session: {
-        _id: session._id,
-        orderId: session.orderId,
-        offerId: session.offerId,
-        customerId: session.customerId,
-        supplierId: session.supplierId,
-        status: session.status,
-      },
+      session: sessionPayload,
       order: {
-        _id: order._id,
+        _id: order._id.toString(),
         status: order.status,
-        customerId: order.customerId,
-        supplierId,
+        customerId: order.customerId.toString(),
+        supplierId: supplierId.toString(),
       },
     });
   } catch (error) {

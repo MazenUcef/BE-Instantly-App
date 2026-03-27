@@ -19,6 +19,12 @@ export const socketEvents = {
   JOIN_SUPPLIER_ORDER_ROOMS: "join_supplier_order_rooms",
   LEAVE_SUPPLIER_ORDER_ROOMS: "leave_supplier_order_rooms",
 
+  JOIN_SESSION_ROOM: "join_session_room",
+  LEAVE_SESSION_ROOM: "leave_session_room",
+
+  SESSION_ROOM_JOINED: "session_room_joined",
+  SUPPLIER_ROOMS_JOINED: "supplier_rooms_joined",
+
   ORDER_NEW: "order:new",
   ORDER_UPDATED: "order:updated",
   ORDER_DELETED: "order:deleted",
@@ -30,6 +36,14 @@ export const socketEvents = {
   OFFER_ACCEPTED: "offer:accepted",
   OFFER_REJECTED: "offer:rejected",
   OFFER_DELETED: "offer:deleted",
+
+  SESSION_CREATED: "session:created",
+  SESSION_UPDATED: "session:updated",
+  SESSION_STATUS_UPDATED: "session:status_updated",
+  SESSION_COMPLETED: "session:completed",
+  SESSION_CANCELLED: "session:cancelled",
+
+  MESSAGE_NEW: "message:new",
 
   SUPPLIER_OFFER_CREATED: "supplier:offer_created",
   SUPPLIER_OFFER_UPDATED: "supplier:offer_updated",
@@ -77,6 +91,32 @@ export const initSocket = (server: any) => {
     }
 
     socket.on(
+      socketEvents.JOIN_SESSION_ROOM,
+      ({ sessionId }: { sessionId: string }) => {
+        if (!sessionId) return;
+
+        const room = socketRooms.chat(sessionId);
+        socket.join(room);
+
+        console.log(`Socket ${socket.id} joined session room ${room}`);
+
+        socket.emit(socketEvents.SESSION_ROOM_JOINED, { sessionId });
+      },
+    );
+
+    socket.on(
+      socketEvents.LEAVE_SESSION_ROOM,
+      ({ sessionId }: { sessionId: string }) => {
+        if (!sessionId) return;
+
+        const room = socketRooms.chat(sessionId);
+        socket.leave(room);
+
+        console.log(`Socket ${socket.id} left session room ${room}`);
+      },
+    );
+
+    socket.on(
       socketEvents.JOIN_SUPPLIER_ORDER_ROOMS,
       ({
         categoryId,
@@ -94,7 +134,7 @@ export const initSocket = (server: any) => {
           console.log(`Socket ${socket.id} joined ${room}`);
         }
 
-        socket.emit("supplier_rooms_joined", {
+        socket.emit(socketEvents.SUPPLIER_ROOMS_JOINED, {
           categoryId,
           governmentIds,
         });
