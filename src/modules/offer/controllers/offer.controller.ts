@@ -1299,10 +1299,10 @@ export const getSupplierPendingOffers = async (req: any, res: Response) => {
         },
         stats: {
           totalPending: total,
-          hasActiveJob: await OfferModel.exists({
+          hasActiveJob: !!(await OfferModel.exists({
             supplierId,
             status: "accepted",
-          }),
+          })),
         },
       },
     });

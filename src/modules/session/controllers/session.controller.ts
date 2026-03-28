@@ -371,7 +371,11 @@ export const completeSession = async (req: Request, res: Response) => {
       { new: true },
     );
 
-    const offer = await Offer.findById(session.offerId);
+    const offer = await Offer.findByIdAndUpdate(
+  session.offerId,
+  { status: "completed" },
+  { new: true },
+);
 
     const [customer, supplier] = await Promise.all([
       UserModel.findById(session.customerId).select("-password"),
