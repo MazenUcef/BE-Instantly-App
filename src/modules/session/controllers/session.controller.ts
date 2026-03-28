@@ -529,3 +529,63 @@ export const confirmSessionPayment = async (req: any, res: Response) => {
     return res.status(500).json({ message: "Failed to confirm payment" });
   }
 };
+
+
+export const getResumeSessionForUser = async (req: Request, res: Response) => {
+  try {
+    const { userId } = req.params;
+
+    const session = await JobSession.findOne({
+      $or: [{ customerId: userId }, { supplierId: userId }],
+    }).sort({ updatedAt: -1 });
+
+    if (!session) {
+      return res.json({ hasAction: false, action: "none", session: null });
+    }
+
+    const populatedSession = await populateSessionData(session);
+    const order = populatedSession?.order;
+
+    const isCustomer = String(session.customerId) === String(userId);
+    const isSupplier = String(session.supplierId) === String(userId);
+
+    if (!["completed", "cancelled"].includes(session.status)) {
+      return res.json({
+        hasAction: true,
+        action: "job_session",
+        session: populatedSession,
+      });
+    }
+
+    if (session.status === "completed") {
+      if (isCustomer && !order?.customerReviewed) {
+        return res.json({
+          hasAction: true,
+          action: "review",
+          session: populatedSession,
+        });
+      }
+
+      if (isSupplier && !session.paymentConfirmed) {
+        return res.json({
+          hasAction: true,
+          action: "payment_confirmation",
+          session: populatedSession,
+        });
+      }
+
+      if (isSupplier && session.paymentConfirmed && !order?.supplierReviewed) {
+        return res.json({
+          hasAction: true,
+          action: "review",
+          session: populatedSession,
+        });
+      }
+    }
+
+    return res.json({ hasAction: false, action: "none", session: populatedSession });
+  } catch (error) {
+    console.error("Get resume session error:", error);
+    res.status(500).json({ message: "Failed to fetch resume session" });
+  }
+};

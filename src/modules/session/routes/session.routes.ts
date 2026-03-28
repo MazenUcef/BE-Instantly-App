@@ -7,6 +7,7 @@ import {
   completeSession,
   getSessionByOrder,
   confirmSessionPayment,
+  getResumeSessionForUser,
 } from "../controllers/session.controller";
 import { authenticate } from "../../../shared/middlewares/auth";
 
@@ -25,5 +26,7 @@ router.get("/active/:userId", authenticate, getActiveSessionForUser);
 router.get("/by-order/:orderId", authenticate, getSessionByOrder);
 
 router.get("/:id", authenticate, getSessionById);
+
+router.get("/resume/:userId", authenticate, getResumeSessionForUser);
 
 export default router;
