@@ -453,3 +453,79 @@ export const getSessionByOrder = async (req: Request, res: Response) => {
     res.status(500).json({ message: "Failed to fetch session" });
   }
 };
+
+export const confirmSessionPayment = async (req: any, res: Response) => {
+  try {
+    const { sessionId } = req.params;
+    const userId = req.user.userId;
+    const userRole = req.user.role;
+
+    const session = await JobSession.findById(sessionId)
+      .populate("customerId")
+      .populate("supplierId")
+      .populate("orderId")
+      .populate("offerId");
+
+    if (!session) {
+      return res.status(404).json({ message: "Session not found" });
+    }
+
+    if (session.status !== "completed") {
+      return res.status(400).json({
+        message: "Payment can only be confirmed after session completion",
+      });
+    }
+
+    if (userRole !== "supplier") {
+      return res.status(403).json({
+        message: "Only supplier can confirm payment",
+      });
+    }
+
+    if (session.supplierId._id.toString() !== userId) {
+      return res.status(403).json({
+        message: "Not allowed to confirm payment for this session",
+      });
+    }
+
+    if (session.paymentConfirmed) {
+      return res.status(400).json({
+        message: "Payment already confirmed",
+      });
+    }
+
+    session.paymentConfirmed = true;
+    await session.save();
+
+    const freshSession = await JobSession.findById(sessionId)
+      .populate("customerId")
+      .populate("supplierId")
+      .populate("orderId")
+      .populate("offerId");
+
+    const io = getIO();
+
+    io.to(socketRooms.user(freshSession!.customerId._id.toString())).emit(
+      socketEvents.SESSION_PAYMENT_CONFIRMED,
+      { session: freshSession }
+    );
+
+    io.to(socketRooms.user(freshSession!.supplierId._id.toString())).emit(
+      socketEvents.SESSION_PAYMENT_CONFIRMED,
+      { session: freshSession }
+    );
+
+    io.to(socketRooms.chat(freshSession!._id.toString())).emit(
+      socketEvents.SESSION_PAYMENT_CONFIRMED,
+      { session: freshSession }
+    );
+
+    return res.status(200).json({
+      message: "Payment confirmed successfully",
+      session: freshSession,
+    });
+  } catch (error) {
+    console.error("Confirm payment error:", error);
+    return res.status(500).json({ message: "Failed to confirm payment" });
+  }
+};

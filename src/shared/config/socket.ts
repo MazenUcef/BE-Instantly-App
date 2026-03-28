@@ -25,6 +25,8 @@ export const socketEvents = {
   SESSION_ROOM_JOINED: "session_room_joined",
   SUPPLIER_ROOMS_JOINED: "supplier_rooms_joined",
 
+  SESSION_PAYMENT_CONFIRMED: "session:payment_confirmed",
+
   ORDER_NEW: "order:new",
   ORDER_UPDATED: "order:updated",
   ORDER_DELETED: "order:deleted",

@@ -5,7 +5,7 @@ export interface IJobSession extends Document {
   offerId: Types.ObjectId;
   customerId: Types.ObjectId;
   supplierId: Types.ObjectId;
-
+  paymentConfirmed: boolean;
   status:
     | "started"
     | "on_the_way"
@@ -27,6 +27,10 @@ const JobSessionSchema = new Schema<IJobSession>(
     offerId: { type: Schema.Types.ObjectId, required: true },
     customerId: { type: Schema.Types.ObjectId, required: true },
     supplierId: { type: Schema.Types.ObjectId, required: true },
+    paymentConfirmed: {
+      type: Boolean,
+      default: false,
+    },
     status: {
       type: String,
       enum: [
