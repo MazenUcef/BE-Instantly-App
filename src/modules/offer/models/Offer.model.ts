@@ -6,7 +6,7 @@ export interface IOffer extends Document {
   type: "price" | "proposal";
   amount: number;
   timeRange?: string;
-  status: "pending" | "accepted" | "rejected" | "expired";
+  status: "pending" | "accepted" | "rejected" | "expired" | "completed";
   createdAt: Date;
   updatedAt: Date;
   expiresAt: Date | null;
@@ -26,7 +26,7 @@ const OfferSchema = new Schema<IOffer>(
     timeRange: { type: String },
     status: {
       type: String,
-      enum: ["pending", "accepted", "rejected", "expired"],
+      enum: ["pending", "accepted", "rejected", "expired", "completed"],
       default: "pending",
     },
     expiresAt: {
