@@ -2,7 +2,7 @@ import { getIO, socketEvents, socketRooms } from "../../../shared/config/socket"
 import { publishNotification } from "../../notification/notification.publisher";
 import { buildSupplierOrderPayload } from "../../../shared/utils/buildSupplierOrderPayload";
 import UserModel from "../../auth/models/User.model";
-import orderModel from "../../order/models/order.model";
+import orderModel from "../../order/models/Order.model";
 import { OFFER_NOTIFICATION_TYPES } from "../../../shared/constants/offer.constants";
 import { OfferRepository } from "../repository/offer.repository";
 

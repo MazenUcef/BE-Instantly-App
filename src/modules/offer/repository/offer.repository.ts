@@ -1,6 +1,6 @@
 import { ClientSession, Types } from "mongoose";
 import { OFFER_STATUS } from "../../../shared/constants/offer.constants";
-import offerModel from "../models/offer.model";
+import offerModel from "../models/Offer.model";
 
 export class OfferRepository {
   static createOffer(

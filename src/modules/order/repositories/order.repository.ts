@@ -1,6 +1,6 @@
 import { ClientSession, Types } from "mongoose";
 import { ORDER_STATUS } from "../../../shared/constants/order.constants";
-import OrderModel from "../models/order.model";
+import OrderModel from "../models/Order.model";
 
 export class OrderRepository {
   static createOrder(

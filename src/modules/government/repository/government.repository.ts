@@ -1,21 +1,21 @@
 import { ClientSession, Types } from "mongoose";
-import governmentModel from "../models/government.model";
+import GovernmentModel from "../models/Government.model";
 
 export class GovernmentRepository {
   static findActive(session?: ClientSession) {
-    return governmentModel.find({ isActive: true })
+    return GovernmentModel.find({ isActive: true })
       .sort({ order: 1, name: 1 })
       .session(session || null);
   }
 
   static findAll(session?: ClientSession) {
-    return governmentModel.find()
+    return GovernmentModel.find()
       .sort({ order: 1, name: 1 })
       .session(session || null);
   }
 
   static findById(governmentId: string | Types.ObjectId, session?: ClientSession) {
-    return governmentModel.findById(governmentId).session(session || null);
+    return GovernmentModel.findById(governmentId).session(session || null);
   }
 
   static findByNormalizedNames(
@@ -23,7 +23,7 @@ export class GovernmentRepository {
     normalizedNameAr: string,
     session?: ClientSession,
   ) {
-    return governmentModel.findOne({
+    return GovernmentModel.findOne({
       $or: [{ normalizedName }, { normalizedNameAr }],
     }).session(session || null);
   }
@@ -40,7 +40,7 @@ export class GovernmentRepository {
     },
     session?: ClientSession,
   ) {
-    return governmentModel.create([data], { session }).then((docs: any[]) => docs[0]);
+    return GovernmentModel.create([data], { session }).then((docs: any[]) => docs[0]);
   }
 
   static updateById(
@@ -48,7 +48,7 @@ export class GovernmentRepository {
     updates: Record<string, any>,
     session?: ClientSession,
   ) {
-    return governmentModel.findByIdAndUpdate(governmentId, updates, {
+    return GovernmentModel.findByIdAndUpdate(governmentId, updates, {
       new: true,
       runValidators: true,
       session,

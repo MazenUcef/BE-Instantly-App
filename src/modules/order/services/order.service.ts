@@ -1,10 +1,10 @@
 import mongoose from "mongoose";
-import OrderModel from "../models/order.model";
+import OrderModel from "../models/Order.model";
 import sessionModel from "../../session/models/session.model";
 import UserModel from "../../auth/models/User.model";
-import OfferModel from "../../offer/models/offer.model";
-import governmentModel from "../../government/models/government.model";
-import categoryModel from "../../category/models/category.model";
+import OfferModel from "../../offer/models/Offer.model";
+import governmentModel from "../../government/models/Government.model";
+import categoryModel from "../../category/models/Category.model";
 import { AppError } from "../../../shared/middlewares/errorHandler";
 import { OrderRepository } from "../repositories/order.repository";
 import { OrderEventService } from "./order-event.service";

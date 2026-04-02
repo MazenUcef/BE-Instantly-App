@@ -1,7 +1,7 @@
 import UserModel from "../../modules/auth/models/User.model";
 import bundleModel from "../../modules/bundle/models/bundle.model";
-import categoryModel from "../../modules/category/models/category.model";
-import governmentModel from "../../modules/government/models/government.model";
+import categoryModel from "../../modules/category/models/Category.model";
+import governmentModel from "../../modules/government/models/Government.model";
 import { AppError } from "../middlewares/errorHandler";
 
 export const validateFile = (file: Express.Multer.File) => {

@@ -6,8 +6,8 @@ import { AvailabilityRepository } from "../repositories/availability.repository"
 
 import { generateSlots, overlapsTimeRange } from "../../../shared/utils/calendar";
 import { ACTIVE_BOOKING_STATUSES, ACTIVE_OFFER_STATUSES_FOR_CALENDAR, DEFAULT_ACCEPTED_JOB_DURATION_MINUTES, DEFAULT_AVAILABILITY_TIMEZONE } from "../../../shared/constants/availability.constants";
-import orderModel from "../../order/models/order.model";
-import offerModel from "../../offer/models/offer.model";
+import orderModel from "../../order/models/Order.model";
+import offerModel from "../../offer/models/Offer.model";
 
 const getDateOnly = (date: Date | string) => {
   const d = new Date(date);

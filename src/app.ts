@@ -19,7 +19,7 @@ import availabilityRoutes from './modules/availability/routes/availability.route
 import bundleRoutes from './modules/bundle/routes/bundle.routes';
 import bundleBookingRoutes from './modules/bundleBooking/routes/bundleBooking.routes';
 import callRoutes from './modules/call/routes/call.routes';
-import governmentRoutes from './modules/government/routes/government.routes'
+import governmentRoutes from './modules/government/routes/Government.routes'
 
 dotenv.config();
 

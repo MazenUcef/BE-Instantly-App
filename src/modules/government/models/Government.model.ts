@@ -12,7 +12,7 @@ export interface IGovernment extends Document {
   updatedAt: Date;
 }
 
-const governmentSchema = new Schema<IGovernment>(
+const GovernmentSchema = new Schema<IGovernment>(
   {
     name: {
       type: String,
@@ -67,8 +67,8 @@ const governmentSchema = new Schema<IGovernment>(
   },
 );
 
-governmentSchema.index({ isActive: 1, order: 1, name: 1 });
-governmentSchema.index({ normalizedName: 1 }, { unique: true });
-governmentSchema.index({ normalizedNameAr: 1 }, { unique: true });
+GovernmentSchema.index({ isActive: 1, order: 1, name: 1 });
+GovernmentSchema.index({ normalizedName: 1 }, { unique: true });
+GovernmentSchema.index({ normalizedNameAr: 1 }, { unique: true });
 
-export default mongoose.model<IGovernment>("Government", governmentSchema);
+export default mongoose.model<IGovernment>("Government", GovernmentSchema);

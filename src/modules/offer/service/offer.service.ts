@@ -1,6 +1,6 @@
 import mongoose from "mongoose";
 import UserModel from "../../auth/models/User.model";
-import orderModel from "../../order/models/order.model";
+import orderModel from "../../order/models/Order.model";
 import sessionModel from "../../session/models/session.model";
 import { AppError } from "../../../shared/middlewares/errorHandler";
 import { OfferEventService } from "./offer-event.service";

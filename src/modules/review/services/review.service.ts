@@ -2,7 +2,7 @@ import mongoose from "mongoose";
 import { AppError } from "../../../shared/middlewares/errorHandler";
 import { ReviewRepository } from "../repositories/review.repository";
 import ReviewModel from "../models/review.model";
-import OrderModel from "../../order/models/order.model";
+import OrderModel from "../../order/models/Order.model";
 import SessionModel from "../../session/models/session.model";
 import UserModel from "../../auth/models/User.model";
 import { REVIEW_NOTIFICATION_TYPES, REVIEW_ROLES } from "../../../shared/constants/review.constants";

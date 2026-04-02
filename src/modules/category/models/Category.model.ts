@@ -11,7 +11,7 @@ export interface ICategory extends Document {
   updatedAt: Date;
 }
 
-const categorySchema = new Schema<ICategory>(
+const CategorySchema = new Schema<ICategory>(
   {
     name: {
       type: String,
@@ -55,7 +55,7 @@ const categorySchema = new Schema<ICategory>(
   },
 );
 
-categorySchema.index({ isActive: 1, createdAt: -1 });
-categorySchema.index({ normalizedName: 1 }, { unique: true });
+CategorySchema.index({ isActive: 1, createdAt: -1 });
+CategorySchema.index({ normalizedName: 1 }, { unique: true });
 
-export default mongoose.model<ICategory>("Category", categorySchema);
+export default mongoose.model<ICategory>("Category", CategorySchema);

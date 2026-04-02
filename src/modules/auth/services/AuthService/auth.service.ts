@@ -24,8 +24,8 @@ import { verifyRefreshToken } from "../../../../shared/utils/token";
 import { uploadToCloudinary } from "../../../../shared/utils/cloudinary";
 import { validateFile } from "../../../../shared/utils/helpers";
 import { Request } from "express";
-import governmentModel from "../../../government/models/government.model";
-import categoryModel from "../../../category/models/category.model";
+import governmentModel from "../../../government/models/Government.model";
+import categoryModel from "../../../category/models/Category.model";
 
 const sanitizeUser = (user: any) => {
   const obj = user.toObject ? user.toObject() : user;
