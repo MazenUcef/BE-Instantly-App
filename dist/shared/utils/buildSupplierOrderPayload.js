@@ -5,7 +5,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.buildSupplierOrderPayload = void 0;
 const User_model_1 = __importDefault(require("../../modules/auth/models/User.model"));
-const Category_model_1 = __importDefault(require("../../modules/category/models/Category.model"));
+const category_model_1 = __importDefault(require("../../modules/category/models/category.model"));
 const government_model_1 = __importDefault(require("../../modules/government/models/government.model"));
 const order_model_1 = __importDefault(require("../../modules/order/models/order.model"));
 const buildSupplierOrderPayload = async (orderId) => {
@@ -18,7 +18,7 @@ const buildSupplierOrderPayload = async (orderId) => {
         .populate({
         path: "categoryId",
         select: "name description icon jobs",
-        model: Category_model_1.default,
+        model: category_model_1.default,
     });
     if (!order)
         return null;

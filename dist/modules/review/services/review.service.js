@@ -17,7 +17,7 @@ class ReviewService {
         const { actorUserId, orderId, rating, comment, role } = input;
         const dbSession = await mongoose_1.default.startSession();
         let createdReview = null;
-        let targetUserId = null;
+        let targetUserId = "";
         let reviewerName = "Someone";
         let averageRating = 0;
         let totalReviews = 0;

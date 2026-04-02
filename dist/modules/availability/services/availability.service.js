@@ -5,7 +5,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.AvailabilityService = void 0;
 const User_model_1 = __importDefault(require("../../auth/models/User.model"));
-const Offer_model_1 = __importDefault(require("../../offer/models/Offer.model"));
+const offer_model_1 = __importDefault(require("../../offer/models/offer.model"));
 const order_model_1 = __importDefault(require("../../order/models/order.model"));
 const bundleBooking_model_1 = __importDefault(require("../../bundleBooking/models/bundleBooking.model"));
 const errorHandler_1 = require("../../../shared/middlewares/errorHandler");
@@ -166,7 +166,7 @@ class AvailabilityService {
             }
             return true;
         });
-        const acceptedOffers = await Offer_model_1.default.find({
+        const acceptedOffers = await offer_model_1.default.find({
             supplierId,
             status: { $in: [...availability_constants_1.ACTIVE_OFFER_STATUSES_FOR_CALENDAR] },
             timeToStart: { $exists: true, $ne: null },

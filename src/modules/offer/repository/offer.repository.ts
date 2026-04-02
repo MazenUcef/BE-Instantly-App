@@ -1,6 +1,6 @@
 import { ClientSession, Types } from "mongoose";
 import { OFFER_STATUS } from "../../../shared/constants/offer.constants";
-import OfferModel from "../models/Offer.model";
+import offerModel from "../models/offer.model";
 
 export class OfferRepository {
   static createOffer(
@@ -15,11 +15,11 @@ export class OfferRepository {
     },
     session?: ClientSession,
   ) {
-    return OfferModel.create([data], { session }).then((docs) => docs[0]);
+    return offerModel.create([data], { session }).then((docs) => docs[0]);
   }
 
   static findById(offerId: Types.ObjectId | string, session?: ClientSession) {
-    return OfferModel.findById(offerId).session(session || null);
+    return offerModel.findById(offerId).session(session || null);
   }
 
   static findPendingOfferBySupplierAndOrder(
@@ -27,7 +27,7 @@ export class OfferRepository {
     orderId: Types.ObjectId | string,
     session?: ClientSession,
   ) {
-    return OfferModel.findOne({
+    return offerModel.findOne({
       supplierId,
       orderId,
       status: OFFER_STATUS.PENDING,
@@ -38,7 +38,7 @@ export class OfferRepository {
     supplierId: Types.ObjectId | string,
     session?: ClientSession,
   ) {
-    return OfferModel.findOne({
+    return offerModel.findOne({
       supplierId,
       status: OFFER_STATUS.ACCEPTED,
     })
@@ -50,7 +50,7 @@ export class OfferRepository {
     supplierId: Types.ObjectId | string,
     session?: ClientSession,
   ) {
-    return OfferModel.find({
+    return offerModel.find({
       supplierId,
       status: OFFER_STATUS.PENDING,
     })
@@ -59,7 +59,7 @@ export class OfferRepository {
   }
 
   static countPendingOffersBySupplier(supplierId: Types.ObjectId | string) {
-    return OfferModel.countDocuments({
+    return offerModel.countDocuments({
       supplierId,
       status: OFFER_STATUS.PENDING,
     });
@@ -69,7 +69,7 @@ export class OfferRepository {
     orderId: Types.ObjectId | string,
     session?: ClientSession,
   ) {
-    return OfferModel.find({
+    return offerModel.find({
       orderId,
       status: OFFER_STATUS.PENDING,
     })
@@ -78,7 +78,7 @@ export class OfferRepository {
   }
 
   static findOrderOffers(orderId: Types.ObjectId | string) {
-    return OfferModel.find({
+    return offerModel.find({
       orderId,
       status: { $in: [OFFER_STATUS.PENDING, OFFER_STATUS.ACCEPTED] },
     }).sort({ createdAt: -1 });
@@ -94,7 +94,7 @@ export class OfferRepository {
     },
     session?: ClientSession,
   ) {
-    return OfferModel.findOneAndUpdate(
+    return offerModel.findOneAndUpdate(
       { _id: offerId, status: OFFER_STATUS.PENDING },
       {
         $set: {
@@ -112,7 +112,7 @@ export class OfferRepository {
     offerId: Types.ObjectId | string,
     session?: ClientSession,
   ) {
-    return OfferModel.findOneAndUpdate(
+    return offerModel.findOneAndUpdate(
       { _id: offerId, status: OFFER_STATUS.PENDING },
       {
         $set: {
@@ -128,7 +128,7 @@ export class OfferRepository {
     offerId: Types.ObjectId | string,
     session?: ClientSession,
   ) {
-    return OfferModel.findOneAndUpdate(
+    return offerModel.findOneAndUpdate(
       { _id: offerId, status: OFFER_STATUS.PENDING },
       {
         $set: {
@@ -145,7 +145,7 @@ export class OfferRepository {
     acceptedOfferId: Types.ObjectId | string,
     session?: ClientSession,
   ) {
-    return OfferModel.updateMany(
+    return offerModel.updateMany(
       {
         orderId,
         _id: { $ne: acceptedOfferId },
@@ -166,7 +166,7 @@ export class OfferRepository {
     acceptedOfferId: Types.ObjectId | string,
     session?: ClientSession,
   ) {
-    return OfferModel.updateMany(
+    return offerModel.updateMany(
       {
         supplierId,
         _id: { $ne: acceptedOfferId },
@@ -187,7 +187,7 @@ export class OfferRepository {
     excludeOfferId: Types.ObjectId | string,
     session?: ClientSession,
   ) {
-    return OfferModel.find({
+    return offerModel.find({
       supplierId,
       status: OFFER_STATUS.PENDING,
       _id: { $ne: excludeOfferId },
@@ -199,7 +199,7 @@ export class OfferRepository {
     supplierId: Types.ObjectId | string,
     session?: ClientSession,
   ) {
-    return OfferModel.findOneAndUpdate(
+    return offerModel.findOneAndUpdate(
       {
         _id: offerId,
         supplierId,
@@ -220,7 +220,7 @@ export class OfferRepository {
     supplierId: Types.ObjectId | string,
     session?: ClientSession,
   ) {
-    return OfferModel.findOneAndUpdate(
+    return offerModel.findOneAndUpdate(
       {
         _id: offerId,
         supplierId,
@@ -243,7 +243,7 @@ export class OfferRepository {
   ) {
     const skip = (page - 1) * limit;
 
-    return OfferModel.find({
+    return offerModel.find({
       supplierId,
       status: OFFER_STATUS.ACCEPTED,
     })
@@ -255,7 +255,7 @@ export class OfferRepository {
   static countSupplierAcceptedOffersHistory(
     supplierId: Types.ObjectId | string,
   ) {
-    return OfferModel.countDocuments({
+    return offerModel.countDocuments({
       supplierId,
       status: OFFER_STATUS.ACCEPTED,
     });
@@ -268,7 +268,7 @@ export class OfferRepository {
   ) {
     const skip = (page - 1) * limit;
 
-    return OfferModel.find({
+    return offerModel.find({
       supplierId,
       status: OFFER_STATUS.PENDING,
     })

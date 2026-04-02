@@ -15,7 +15,7 @@ import { publishNotification } from "../../../notification/notification.publishe
 import { AuthTokenService } from "../auth-token.service";
 import { AppError } from "../../../../shared/middlewares/errorHandler";
 import GovernmentModel from "../../../government/models/government.model";
-import CategoryModel from "../../../category/models/Category.model";
+import CategoryModel from "../../../category/models/category.model";
 import { publishToQueue } from "../../../../shared/config/rabbitmq";
 import redis from "../../../../shared/config/redis";
 import {

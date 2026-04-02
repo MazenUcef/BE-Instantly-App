@@ -21,7 +21,7 @@ export interface IOrder extends Document {
   updatedAt: Date;
 }
 
-const OrderSchema = new Schema<IOrder>(
+const orderSchema = new Schema<IOrder>(
   {
     customerId: {
       type: Schema.Types.ObjectId,
@@ -114,12 +114,12 @@ const OrderSchema = new Schema<IOrder>(
   },
 );
 
-OrderSchema.index({ categoryId: 1, governmentId: 1, status: 1, createdAt: -1 });
-OrderSchema.index({ customerId: 1, status: 1, createdAt: -1 });
-OrderSchema.index({ supplierId: 1, status: 1, updatedAt: -1 });
-OrderSchema.index({ customerId: 1, customerReviewed: 1, status: 1, updatedAt: -1 });
+orderSchema.index({ categoryId: 1, governmentId: 1, status: 1, createdAt: -1 });
+orderSchema.index({ customerId: 1, status: 1, createdAt: -1 });
+orderSchema.index({ supplierId: 1, status: 1, updatedAt: -1 });
+orderSchema.index({ customerId: 1, customerReviewed: 1, status: 1, updatedAt: -1 });
 
-OrderSchema.index(
+orderSchema.index(
   { customerId: 1, status: 1 },
   {
     unique: true,
@@ -130,4 +130,4 @@ OrderSchema.index(
   },
 );
 
-export default mongoose.model<IOrder>("Order", OrderSchema);
+export default mongoose.model<IOrder>("Order", orderSchema);

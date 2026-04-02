@@ -1,6 +1,6 @@
 import UserModel from "../../modules/auth/models/User.model";
 import bundleModel from "../../modules/bundle/models/bundle.model";
-import CategoryModel from "../../modules/category/models/Category.model";
+import CategoryModel from "../../modules/category/models/category.model";
 import GovernmentModel from "../../modules/government/models/government.model";
 import { AppError } from "../middlewares/errorHandler";
 

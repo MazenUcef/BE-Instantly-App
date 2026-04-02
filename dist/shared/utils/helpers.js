@@ -6,7 +6,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.buildBundlePayload = exports.validateFile = void 0;
 const User_model_1 = __importDefault(require("../../modules/auth/models/User.model"));
 const bundle_model_1 = __importDefault(require("../../modules/bundle/models/bundle.model"));
-const Category_model_1 = __importDefault(require("../../modules/category/models/Category.model"));
+const category_model_1 = __importDefault(require("../../modules/category/models/category.model"));
 const government_model_1 = __importDefault(require("../../modules/government/models/government.model"));
 const errorHandler_1 = require("../middlewares/errorHandler");
 const validateFile = (file) => {
@@ -27,7 +27,7 @@ const buildBundlePayload = async (bundleId) => {
         User_model_1.default.findById(bundle.supplierId)
             .select("-password -refreshToken -biometrics")
             .lean(),
-        Category_model_1.default.findById(bundle.categoryId).lean(),
+        category_model_1.default.findById(bundle.categoryId).lean(),
         government_model_1.default.find({
             _id: { $in: bundle.governmentIds || [] },
             isActive: true,

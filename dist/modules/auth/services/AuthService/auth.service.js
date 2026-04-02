@@ -13,7 +13,7 @@ const notification_publisher_1 = require("../../../notification/notification.pub
 const auth_token_service_1 = require("../auth-token.service");
 const errorHandler_1 = require("../../../../shared/middlewares/errorHandler");
 const government_model_1 = __importDefault(require("../../../government/models/government.model"));
-const Category_model_1 = __importDefault(require("../../../category/models/Category.model"));
+const category_model_1 = __importDefault(require("../../../category/models/category.model"));
 const rabbitmq_1 = require("../../../../shared/config/rabbitmq");
 const redis_1 = __importDefault(require("../../../../shared/config/redis"));
 const password_1 = require("../../../../shared/utils/password");
@@ -69,7 +69,7 @@ class AuthService {
                     }
                     const [governments, category] = await Promise.all([
                         government_model_1.default.find({ _id: { $in: data.governmentIds } }).session(session),
-                        Category_model_1.default.findById(data.categoryId).session(session),
+                        category_model_1.default.findById(data.categoryId).session(session),
                     ]);
                     if (governments.length !== data.governmentIds.length) {
                         throw new errorHandler_1.AppError("One or more governments are invalid", 400);
@@ -296,7 +296,7 @@ class AuthService {
             if (!user.categoryId) {
                 throw new errorHandler_1.AppError("Supplier account missing category", 400);
             }
-            const categoryDoc = await Category_model_1.default.findById(user.categoryId);
+            const categoryDoc = await category_model_1.default.findById(user.categoryId);
             if (!categoryDoc) {
                 throw new errorHandler_1.AppError("User category not found", 400);
             }
@@ -455,7 +455,7 @@ class AuthService {
                     if (!finalCategoryId) {
                         throw new errorHandler_1.AppError("Category is required to become supplier", 400);
                     }
-                    const category = await Category_model_1.default.findById(finalCategoryId).session(dbSession);
+                    const category = await category_model_1.default.findById(finalCategoryId).session(dbSession);
                     if (!category) {
                         throw new errorHandler_1.AppError("Invalid category", 400);
                     }

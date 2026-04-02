@@ -1,5 +1,5 @@
 import UserModel from "../../modules/auth/models/User.model";
-import CategoryModel from "../../modules/category/models/Category.model";
+import CategoryModel from "../../modules/category/models/category.model";
 import GovernmentModel from "../../modules/government/models/government.model";
 import OrderModel from "../../modules/order/models/order.model";
 

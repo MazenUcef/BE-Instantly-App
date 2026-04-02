@@ -34,7 +34,7 @@ var __importStar = (this && this.__importStar) || (function () {
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
 const mongoose_1 = __importStar(require("mongoose"));
-const GovernmentSchema = new mongoose_1.Schema({
+const governmentSchema = new mongoose_1.Schema({
     name: {
         type: String,
         required: true,
@@ -85,7 +85,7 @@ const GovernmentSchema = new mongoose_1.Schema({
     timestamps: true,
     versionKey: false,
 });
-GovernmentSchema.index({ isActive: 1, order: 1, name: 1 });
-GovernmentSchema.index({ normalizedName: 1 }, { unique: true });
-GovernmentSchema.index({ normalizedNameAr: 1 }, { unique: true });
-exports.default = mongoose_1.default.model("Government", GovernmentSchema);
+governmentSchema.index({ isActive: 1, order: 1, name: 1 });
+governmentSchema.index({ normalizedName: 1 }, { unique: true });
+governmentSchema.index({ normalizedNameAr: 1 }, { unique: true });
+exports.default = mongoose_1.default.model("Government", governmentSchema);

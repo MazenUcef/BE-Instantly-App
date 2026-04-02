@@ -35,7 +35,7 @@ var __importStar = (this && this.__importStar) || (function () {
 Object.defineProperty(exports, "__esModule", { value: true });
 const mongoose_1 = __importStar(require("mongoose"));
 const order_constants_1 = require("../../../shared/constants/order.constants");
-const OrderSchema = new mongoose_1.Schema({
+const orderSchema = new mongoose_1.Schema({
     customerId: {
         type: mongoose_1.Schema.Types.ObjectId,
         ref: "User",
@@ -124,15 +124,15 @@ const OrderSchema = new mongoose_1.Schema({
     timestamps: true,
     versionKey: false,
 });
-OrderSchema.index({ categoryId: 1, governmentId: 1, status: 1, createdAt: -1 });
-OrderSchema.index({ customerId: 1, status: 1, createdAt: -1 });
-OrderSchema.index({ supplierId: 1, status: 1, updatedAt: -1 });
-OrderSchema.index({ customerId: 1, customerReviewed: 1, status: 1, updatedAt: -1 });
-OrderSchema.index({ customerId: 1, status: 1 }, {
+orderSchema.index({ categoryId: 1, governmentId: 1, status: 1, createdAt: -1 });
+orderSchema.index({ customerId: 1, status: 1, createdAt: -1 });
+orderSchema.index({ supplierId: 1, status: 1, updatedAt: -1 });
+orderSchema.index({ customerId: 1, customerReviewed: 1, status: 1, updatedAt: -1 });
+orderSchema.index({ customerId: 1, status: 1 }, {
     unique: true,
     partialFilterExpression: {
         status: { $in: [order_constants_1.ORDER_STATUS.PENDING, order_constants_1.ORDER_STATUS.IN_PROGRESS] },
     },
     name: "uniq_customer_single_active_order",
 });
-exports.default = mongoose_1.default.model("Order", OrderSchema);
+exports.default = mongoose_1.default.model("Order", orderSchema);

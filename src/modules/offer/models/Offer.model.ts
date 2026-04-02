@@ -19,7 +19,7 @@ export interface IOffer extends Document {
   updatedAt: Date;
 }
 
-const OfferSchema = new Schema<IOffer>(
+const offerSchema = new Schema<IOffer>(
   {
     orderId: {
       type: Schema.Types.ObjectId,
@@ -78,10 +78,10 @@ const OfferSchema = new Schema<IOffer>(
   },
 );
 
-OfferSchema.index({ orderId: 1, status: 1, createdAt: -1 });
-OfferSchema.index({ supplierId: 1, status: 1, createdAt: -1 });
-OfferSchema.index({ supplierId: 1, updatedAt: -1 });
-OfferSchema.index(
+offerSchema.index({ orderId: 1, status: 1, createdAt: -1 });
+offerSchema.index({ supplierId: 1, status: 1, createdAt: -1 });
+offerSchema.index({ supplierId: 1, updatedAt: -1 });
+offerSchema.index(
   { expiresAt: 1 },
   {
     expireAfterSeconds: 0,
@@ -89,7 +89,7 @@ OfferSchema.index(
   },
 );
 
-OfferSchema.index(
+offerSchema.index(
   { orderId: 1, supplierId: 1, status: 1 },
   {
     unique: true,
@@ -100,7 +100,7 @@ OfferSchema.index(
   },
 );
 
-OfferSchema.index(
+offerSchema.index(
   { orderId: 1, status: 1 },
   {
     unique: true,
@@ -111,7 +111,7 @@ OfferSchema.index(
   },
 );
 
-OfferSchema.index(
+offerSchema.index(
   { supplierId: 1, status: 1 },
   {
     unique: true,
@@ -122,4 +122,4 @@ OfferSchema.index(
   },
 );
 
-export default mongoose.model<IOffer>("Offer", OfferSchema);
+export default mongoose.model<IOffer>("Offer", offerSchema);

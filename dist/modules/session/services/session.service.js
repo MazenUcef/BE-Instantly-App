@@ -6,7 +6,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.SessionService = void 0;
 const mongoose_1 = __importDefault(require("mongoose"));
 const order_model_1 = __importDefault(require("../../order/models/order.model"));
-const Offer_model_1 = __importDefault(require("../../offer/models/Offer.model"));
+const offer_model_1 = __importDefault(require("../../offer/models/offer.model"));
 const User_model_1 = __importDefault(require("../../auth/models/User.model"));
 const errorHandler_1 = require("../../../shared/middlewares/errorHandler");
 const session_repository_1 = require("../repositories/session.repository");
@@ -28,7 +28,7 @@ const populateSessionData = async (session) => {
             .populate("categoryId", "name icon")
             .populate("governmentId", "name nameAr")
             .lean(),
-        Offer_model_1.default.findById(session.offerId).lean(),
+        offer_model_1.default.findById(session.offerId).lean(),
         User_model_1.default.findById(session.customerId)
             .select("-password -refreshToken -biometrics")
             .lean(),
@@ -161,9 +161,9 @@ class SessionService {
                     if (!relatedOrder) {
                         throw new errorHandler_1.AppError("Associated order not found", 404);
                     }
-                    await Offer_model_1.default.findByIdAndUpdate(session.offerId, { status: "rejected", rejectedAt: new Date() }, { session: dbSession, new: true });
+                    await offer_model_1.default.findByIdAndUpdate(session.offerId, { status: "rejected", rejectedAt: new Date() }, { session: dbSession, new: true });
                     if (isCustomer) {
-                        await Offer_model_1.default.updateMany({ orderId: relatedOrder._id, status: "pending" }, { $set: { status: "rejected", rejectedAt: new Date() } }, { session: dbSession });
+                        await offer_model_1.default.updateMany({ orderId: relatedOrder._id, status: "pending" }, { $set: { status: "rejected", rejectedAt: new Date() } }, { session: dbSession });
                         await order_model_1.default.findByIdAndDelete(relatedOrder._id, {
                             session: dbSession,
                         });
@@ -247,7 +247,7 @@ class SessionService {
                 }
                 await Promise.all([
                     order_model_1.default.findByIdAndUpdate(session.orderId, { status: "completed" }, { new: true, session: dbSession }),
-                    Offer_model_1.default.findByIdAndUpdate(session.offerId, { status: "completed", completedAt: new Date() }, { new: true, session: dbSession }),
+                    offer_model_1.default.findByIdAndUpdate(session.offerId, { status: "completed", completedAt: new Date() }, { new: true, session: dbSession }),
                 ]);
             });
         }

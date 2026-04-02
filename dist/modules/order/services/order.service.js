@@ -8,9 +8,9 @@ const mongoose_1 = __importDefault(require("mongoose"));
 const order_model_1 = __importDefault(require("../models/order.model"));
 const session_model_1 = __importDefault(require("../../session/models/session.model"));
 const User_model_1 = __importDefault(require("../../auth/models/User.model"));
-const Offer_model_1 = __importDefault(require("../../offer/models/Offer.model"));
+const offer_model_1 = __importDefault(require("../../offer/models/offer.model"));
 const government_model_1 = __importDefault(require("../../government/models/government.model"));
-const Category_model_1 = __importDefault(require("../../category/models/Category.model"));
+const category_model_1 = __importDefault(require("../../category/models/category.model"));
 const errorHandler_1 = require("../../../shared/middlewares/errorHandler");
 const order_repository_1 = require("../repositories/order.repository");
 const order_event_service_1 = require("./order-event.service");
@@ -23,7 +23,7 @@ class OrderService {
     static async validateOrderDependencies(input) {
         const [government, category] = await Promise.all([
             government_model_1.default.findById(input.governmentId),
-            Category_model_1.default.findById(input.categoryId),
+            category_model_1.default.findById(input.categoryId),
         ]);
         if (!government) {
             throw new errorHandler_1.AppError("Invalid government", 400);
@@ -140,7 +140,7 @@ class OrderService {
                 if (![order_constants_1.ORDER_STATUS.PENDING, order_constants_1.ORDER_STATUS.IN_PROGRESS].includes(order.status)) {
                     throw new errorHandler_1.AppError("Only pending or in-progress orders can be deleted by customer", 400);
                 }
-                pendingOffers = await Offer_model_1.default.find({
+                pendingOffers = await offer_model_1.default.find({
                     orderId: order._id,
                     status: offer_constants_1.OFFER_STATUS.PENDING,
                 }).session(dbSession || null);
@@ -152,12 +152,12 @@ class OrderService {
                     },
                 })
                     .session(dbSession || null);
-                acceptedOffer = await Offer_model_1.default.findOne({
+                acceptedOffer = await offer_model_1.default.findOne({
                     orderId: order._id,
                     status: offer_constants_1.OFFER_STATUS.ACCEPTED,
                 }).session(dbSession || null);
                 if (order.status === order_constants_1.ORDER_STATUS.PENDING) {
-                    await Offer_model_1.default.updateMany({ orderId: order._id, status: offer_constants_1.OFFER_STATUS.PENDING }, {
+                    await offer_model_1.default.updateMany({ orderId: order._id, status: offer_constants_1.OFFER_STATUS.PENDING }, {
                         $set: {
                             status: offer_constants_1.OFFER_STATUS.REJECTED,
                             rejectedAt: new Date(),
@@ -183,7 +183,7 @@ class OrderService {
                         acceptedOffer.rejectedAt = new Date();
                         await acceptedOffer.save({ session: dbSession });
                     }
-                    await Offer_model_1.default.updateMany({
+                    await offer_model_1.default.updateMany({
                         orderId: order._id,
                         _id: { $ne: acceptedOffer?._id },
                         status: offer_constants_1.OFFER_STATUS.PENDING,
@@ -279,7 +279,7 @@ class OrderService {
                 },
             };
         }
-        const activeAcceptedOffer = await Offer_model_1.default.findOne({
+        const activeAcceptedOffer = await offer_model_1.default.findOne({
             supplierId,
             status: "accepted",
         }).sort({ createdAt: -1 });
@@ -301,7 +301,7 @@ class OrderService {
                 governmentIds: supplierGovernmentIds,
                 excludeCustomerId: supplierId,
             }),
-            Offer_model_1.default.find({
+            offer_model_1.default.find({
                 supplierId,
                 status: "pending",
             }).select("orderId"),
