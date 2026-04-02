@@ -1,78 +1,48 @@
-import { Request, Response } from "express";
-import notificationsModel from "../models/notifications.model";
-import { getIO } from "../../../shared/config/socket";
+import { Response } from "express";
+import { NotificationService } from "../services/notification.service";
 import { IAuthRequest } from "../../../shared/types";
 
-export const createNotification = async (req: Request, res: Response) => {
-  try {
-    const { userId, type, title, message, data } = req.body;
+export const createNotification = async (req: IAuthRequest, res: Response) => {
+  const result = await NotificationService.createNotification({
+    actorUserId: req.user!.userId,
+    actorRole: req.user!.role,
+    userId: req.body.userId,
+    type: req.body.type,
+    title: req.body.title,
+    message: req.body.message,
+    data: req.body.data,
+    internal: false,
+  });
 
-    const notification = await notificationsModel.create({
-      userId,
-      type,
-      title,
-      message,
-      data,
-    });
-
-    const io = getIO();
-
-    io.to(`user_${userId}`).emit("new_notification", notification);
-
-    res.status(201).json(notification);
-  } catch (error) {
-    res.status(500).json({ message: "Failed to create notification" });
-  }
+  return res.status(201).json(result);
 };
 
 export const getUserNotifications = async (
   req: IAuthRequest,
   res: Response,
 ) => {
-  try {
-    const userId = req?.user?.userId;
+  const result = await NotificationService.getUserNotifications({
+    userId: req.user!.userId,
+    page: Number(req.query.page || 1),
+    limit: Number(req.query.limit || 20),
+  });
 
-    const notifications = await notificationsModel
-      .find({ userId })
-      .sort({ createdAt: -1 });
-
-    res.json({ count: notifications.length, notifications });
-  } catch (error) {
-    console.log("error", error);
-    res.status(500).json({ message: "Failed to fetch notifications" });
-  }
+  return res.status(200).json(result);
 };
 
-export const markAsRead = async (req: Request, res: Response) => {
-  try {
-    const notification = await notificationsModel.findByIdAndUpdate(
-      req.params.id,
-      { isRead: true },
-      { new: true },
-    );
+export const markAsRead = async (req: IAuthRequest, res: Response) => {
+  const result = await NotificationService.markAsRead({
+    notificationId: Array.isArray(req.params.id) ? req.params.id[0] : req.params.id,
+    userId: req.user!.userId,
+  });
 
-    if (!notification) {
-      return res.status(404).json({ message: "Notification not found" });
-    }
-
-    res.json(notification);
-  } catch (error) {
-    res.status(500).json({ message: "Failed to update notification" });
-  }
+  return res.status(200).json(result);
 };
 
 export const markAllAsRead = async (req: IAuthRequest, res: Response) => {
-  try {
-    const userId = req?.user?.userId;
+  const result = await NotificationService.markAllAsRead({
+    userId: req.user!.userId,
+  });
 
-    await notificationsModel.updateMany(
-      { userId, isRead: false },
-      { isRead: true },
-    );
-
-    res.json({ message: "All notifications marked as read" });
-  } catch (error) {
-    res.status(500).json({ message: "Failed to update notifications" });
-  }
+  return res.status(200).json(result);
 };
-

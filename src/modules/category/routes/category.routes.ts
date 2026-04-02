@@ -7,18 +7,41 @@ import {
   deleteCategory,
 } from "../controllers/category.controller";
 import { authenticate, authorize } from "../../../shared/middlewares/auth";
-import upload from "../../../shared/config/multer";
+import {
+  validateCreateCategory,
+  validateGetCategoryById,
+  validateUpdateCategory,
+  validateDeleteCategory,
+} from "../validators/category.validation";
 
 const router = Router();
 
-router.post("/", authenticate, authorize("admin"),upload.fields([{ name: 'image', maxCount: 1 }]), createCategory);
+router.post(
+  "/",
+  authenticate,
+  authorize("admin"),
+  validateCreateCategory,
+  createCategory,
+);
 
 router.get("/", getAllCategories);
 
-router.get("/:id", getCategoryById);
+router.get("/:id", validateGetCategoryById, getCategoryById);
 
-router.put("/:id", authenticate, authorize("admin"),upload.fields([{ name: 'image', maxCount: 1 }]), updateCategory);
+router.put(
+  "/:id",
+  authenticate,
+  authorize("admin"),
+  validateUpdateCategory,
+  updateCategory,
+);
 
-router.delete("/:id", authenticate, authorize("admin"), deleteCategory);
+router.delete(
+  "/:id",
+  authenticate,
+  authorize("admin"),
+  validateDeleteCategory,
+  deleteCategory,
+);
 
 export default router;

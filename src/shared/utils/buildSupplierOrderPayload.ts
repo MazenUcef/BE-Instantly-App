@@ -1,7 +1,7 @@
 import UserModel from "../../modules/auth/models/User.model";
 import CategoryModel from "../../modules/category/models/Category.model";
-import GovernmentModel from "../../modules/government/models/Government.model";
-import OrderModel from "../../modules/order/models/Order.model";
+import GovernmentModel from "../../modules/government/models/government.model";
+import OrderModel from "../../modules/order/models/order.model";
 
 
 export const buildSupplierOrderPayload = async (orderId: string) => {

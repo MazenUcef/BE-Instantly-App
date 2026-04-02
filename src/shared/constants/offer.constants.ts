@@ -1,0 +1,25 @@
+export const OFFER_STATUS = {
+  PENDING: "pending",
+  ACCEPTED: "accepted",
+  REJECTED: "rejected",
+  EXPIRED: "expired",
+  COMPLETED: "completed",
+  WITHDRAWN: "withdrawn",
+} as const;
+
+export type OfferStatus = (typeof OFFER_STATUS)[keyof typeof OFFER_STATUS];
+
+export const OFFER_NOTIFICATION_TYPES = {
+  NEW_OFFER: "NEW_OFFER",
+  OFFER_UPDATED: "OFFER_UPDATED",
+  OFFER_ACCEPTED: "OFFER_ACCEPTED",
+  OFFER_REJECTED: "OFFER_REJECTED",
+  OFFER_WITHDRAWN: "OFFER_WITHDRAWN",
+  ORDER_ACCEPTED_DIRECT: "ORDER_ACCEPTED_DIRECT",
+  OFFERS_WITHDRAWN: "OFFERS_WITHDRAWN",
+} as const;
+
+export const ACTIVE_OFFER_STATUSES = [
+  OFFER_STATUS.PENDING,
+  OFFER_STATUS.ACCEPTED,
+] as const;

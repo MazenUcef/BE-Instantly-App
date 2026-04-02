@@ -1,40 +1,125 @@
 import mongoose, { Schema, Document, Types } from "mongoose";
+import {
+  OFFER_STATUS,
+  OfferStatus,
+} from "../../../shared/constants/offer.constants";
 
 export interface IOffer extends Document {
   orderId: Types.ObjectId;
   supplierId: Types.ObjectId;
-  type: "price" | "proposal";
   amount: number;
-  timeRange?: string;
-  status: "pending" | "accepted" | "rejected" | "expired" | "completed";
+  timeRange?: string | null;
+  timeToStart?: Date | null;
+  status: OfferStatus;
+  expiresAt?: Date | null;
+  acceptedAt?: Date | null;
+  rejectedAt?: Date | null;
+  withdrawnAt?: Date | null;
   createdAt: Date;
   updatedAt: Date;
-  expiresAt: Date | null;
-  timeToStart: Date;
 }
 
 const OfferSchema = new Schema<IOffer>(
   {
-    orderId: { type: Schema.Types.ObjectId, required: true, ref: "Order" },
-    supplierId: { type: Schema.Types.ObjectId, required: true, ref: "User" },
-    type: { type: String, enum: ["price", "proposal"], required: true },
-    amount: { type: Number, required: true },
+    orderId: {
+      type: Schema.Types.ObjectId,
+      ref: "Order",
+      required: true,
+      index: true,
+    },
+    supplierId: {
+      type: Schema.Types.ObjectId,
+      ref: "User",
+      required: true,
+      index: true,
+    },
+    amount: {
+      type: Number,
+      required: true,
+      min: 1,
+    },
+    timeRange: {
+      type: String,
+      default: null,
+      trim: true,
+      maxlength: 200,
+    },
     timeToStart: {
       type: Date,
-      required: false,
+      default: null,
     },
-    timeRange: { type: String },
     status: {
       type: String,
-      enum: ["pending", "accepted", "rejected", "expired", "completed"],
-      default: "pending",
+      enum: Object.values(OFFER_STATUS),
+      default: OFFER_STATUS.PENDING,
+      index: true,
     },
     expiresAt: {
       type: Date,
       default: null,
+      index: true,
+    },
+    acceptedAt: {
+      type: Date,
+      default: null,
+    },
+    rejectedAt: {
+      type: Date,
+      default: null,
+    },
+    withdrawnAt: {
+      type: Date,
+      default: null,
     },
   },
-  { timestamps: true },
+  {
+    timestamps: true,
+    versionKey: false,
+  },
+);
+
+OfferSchema.index({ orderId: 1, status: 1, createdAt: -1 });
+OfferSchema.index({ supplierId: 1, status: 1, createdAt: -1 });
+OfferSchema.index({ supplierId: 1, updatedAt: -1 });
+OfferSchema.index(
+  { expiresAt: 1 },
+  {
+    expireAfterSeconds: 0,
+    partialFilterExpression: { expiresAt: { $type: "date" } },
+  },
+);
+
+OfferSchema.index(
+  { orderId: 1, supplierId: 1, status: 1 },
+  {
+    unique: true,
+    partialFilterExpression: {
+      status: OFFER_STATUS.PENDING,
+    },
+    name: "uniq_supplier_pending_offer_per_order",
+  },
+);
+
+OfferSchema.index(
+  { orderId: 1, status: 1 },
+  {
+    unique: true,
+    partialFilterExpression: {
+      status: OFFER_STATUS.ACCEPTED,
+    },
+    name: "uniq_order_single_accepted_offer",
+  },
+);
+
+OfferSchema.index(
+  { supplierId: 1, status: 1 },
+  {
+    unique: true,
+    partialFilterExpression: {
+      status: OFFER_STATUS.ACCEPTED,
+    },
+    name: "uniq_supplier_single_active_accepted_offer",
+  },
 );
 
 export default mongoose.model<IOffer>("Offer", OfferSchema);

@@ -54,9 +54,17 @@ export const errorHandler = (err: Error, req: Request, res: Response, next: Next
   const statusCode = (error as any).statusCode || 500;
   const message = error.message || 'Internal Server Error';
 
+  // Include additional properties if they exist on the error
+  const additionalData: any = {};
+  if ((error as any).reviewRequired) additionalData.reviewRequired = (error as any).reviewRequired;
+  if ((error as any).order) additionalData.order = (error as any).order;
+  if ((error as any).availableJobTitles) additionalData.availableJobTitles = (error as any).availableJobTitles;
+  if ((error as any).callId) additionalData.callId = (error as any).callId;
+
   res.status(statusCode).json({
     success: false,
     message,
+    ...additionalData,
     ...(process.env.NODE_ENV === 'development' && { stack: err.stack })
   });
 };

@@ -1,88 +1,32 @@
-import { Response } from "express";
-import Message from "../models/Message.model";
-import { getIO, socketEvents, socketRooms } from "../../../shared/config/socket";
-import JobSession from "../../session/models/session.model";
+import { Request, Response } from "express";
+import { ChatService } from "../services/chat.service";
 
 export const sendMessage = async (req: any, res: Response) => {
-  try {
-    const { sessionId, message } = req.body;
-    const senderId = req.user.userId;
+  const result = await ChatService.sendMessage({
+    senderId: req.user.userId,
+    sessionId: req.body.sessionId,
+    message: req.body.message,
+  });
 
-    const session = await JobSession.findById(sessionId);
-
-    if (!session) {
-      return res.status(404).json({ message: "Session not found" });
-    }
-
-    if (["completed", "cancelled"].includes(session.status)) {
-      return res.status(403).json({
-        message: "Chat is closed. Session already completed.",
-      });
-    }
-
-    if (
-      session.customerId.toString() !== senderId &&
-      session.supplierId.toString() !== senderId
-    ) {
-      return res.status(403).json({ message: "Not allowed in this chat" });
-    }
-
-    const receiverId =
-      senderId === session.customerId.toString()
-        ? session.supplierId.toString()
-        : session.customerId.toString();
-
-    const newMessage = await Message.create({
-      sessionId,
-      senderId,
-      receiverId,
-      message,
-    });
-
-    const io = getIO();
-
-    io.to(socketRooms.chat(sessionId)).emit(socketEvents.MESSAGE_NEW, {
-      message: newMessage,
-      sessionId,
-    });
-
-    return res.status(201).json(newMessage);
-  } catch (error) {
-    console.error("Send message error:", error);
-    return res.status(500).json({ message: "Failed to send message" });
-  }
+  return res.status(201).json(result);
 };
 
 export const getMessagesBySession = async (req: any, res: Response) => {
-  try {
-    const { sessionId } = req.params;
-    const userId = req.user.userId;
+  const result = await ChatService.getMessagesBySession({
+    userId: req.user.userId,
+    sessionId: req.params.sessionId,
+    page: Number(req.query.page || 1),
+    limit: Number(req.query.limit || 50),
+  });
 
-    const session = await JobSession.findById(sessionId);
+  return res.status(200).json(result);
+};
 
-    if (!session) {
-      return res.status(404).json({ message: "Session not found" });
-    }
+export const markMessagesAsRead = async (req: any, res: Response) => {
+  const result = await ChatService.markMessagesAsRead({
+    userId: req.user.userId,
+    sessionId: req.params.sessionId,
+  });
 
-    if (["completed", "cancelled"].includes(session.status)) {
-      return res.status(403).json({
-        message: "Chat is closed. Session completed.",
-      });
-    }
-
-    if (
-      session.customerId.toString() !== userId &&
-      session.supplierId.toString() !== userId
-    ) {
-      return res.status(403).json({ message: "Not allowed" });
-    }
-
-    const messages = await Message.find({ sessionId }).sort({
-      createdAt: 1,
-    });
-
-    res.json({ count: messages.length, messages });
-  } catch (error) {
-    res.status(500).json({ message: "Failed to fetch messages" });
-  }
+  return res.status(200).json(result);
 };

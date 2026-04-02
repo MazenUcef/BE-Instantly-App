@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { authenticate } from "../../../shared/middlewares/auth";
 import {
   createSession,
   getSessionById,
@@ -9,24 +10,71 @@ import {
   confirmSessionPayment,
   getResumeSessionForUser,
 } from "../controllers/session.controller";
-import { authenticate } from "../../../shared/middlewares/auth";
+import {
+  validateCreateSession,
+  validateSessionIdParam,
+  validateSessionPaymentParam,
+  validateOrderIdParam,
+  validateUserIdParam,
+  validateUpdateSessionStatus,
+} from "../validators/session.validation";
 
 const router = Router();
 
-router.post("/", authenticate, createSession);
+router.post(
+  "/",
+  authenticate,
+  validateCreateSession,
+  createSession,
+);
 
-router.patch("/:id/status", authenticate, updateSessionStatus);
+router.patch(
+  "/:id/status",
+  authenticate,
+  validateUpdateSessionStatus,
+  updateSessionStatus,
+);
 
-router.patch("/:id/complete", authenticate, completeSession);
+router.patch(
+  "/:id/complete",
+  authenticate,
+  validateSessionIdParam,
+  completeSession,
+);
 
-router.patch("/:sessionId/confirm-payment", authenticate, confirmSessionPayment);
+router.patch(
+  "/:sessionId/confirm-payment",
+  authenticate,
+  validateSessionPaymentParam,
+  confirmSessionPayment,
+);
 
-router.get("/active/:userId", authenticate, getActiveSessionForUser);
+router.get(
+  "/active/:userId",
+  authenticate,
+  validateUserIdParam,
+  getActiveSessionForUser,
+);
 
-router.get("/by-order/:orderId", authenticate, getSessionByOrder);
+router.get(
+  "/by-order/:orderId",
+  authenticate,
+  validateOrderIdParam,
+  getSessionByOrder,
+);
 
-router.get("/:id", authenticate, getSessionById);
+router.get(
+  "/resume/:userId",
+  authenticate,
+  validateUserIdParam,
+  getResumeSessionForUser,
+);
 
-router.get("/resume/:userId", authenticate, getResumeSessionForUser);
+router.get(
+  "/:id",
+  authenticate,
+  validateSessionIdParam,
+  getSessionById,
+);
 
 export default router;

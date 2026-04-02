@@ -1,14 +1,41 @@
-import { Schema, model } from "mongoose";
+import mongoose, { Schema, Types, Document } from "mongoose";
 
-const ReviewSchema = new Schema(
+export interface IReview extends Document {
+  reviewerId: Types.ObjectId;
+  targetUserId: Types.ObjectId;
+  orderId: Types.ObjectId;
+  sessionId?: Types.ObjectId | null;
+  rating: number;
+  comment: string;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+const ReviewSchema = new Schema<IReview>(
   {
     reviewerId: {
-      type: String,
+      type: Schema.Types.ObjectId,
+      ref: "User",
       required: true,
+      index: true,
     },
     targetUserId: {
-      type: String,
+      type: Schema.Types.ObjectId,
+      ref: "User",
       required: true,
+      index: true,
+    },
+    orderId: {
+      type: Schema.Types.ObjectId,
+      ref: "Order",
+      required: true,
+      index: true,
+    },
+    sessionId: {
+      type: Schema.Types.ObjectId,
+      ref: "JobSession",
+      default: null,
+      index: true,
     },
     rating: {
       type: Number,
@@ -20,9 +47,18 @@ const ReviewSchema = new Schema(
       type: String,
       required: true,
       trim: true,
+      minlength: 2,
+      maxlength: 1000,
     },
   },
-  { timestamps: true }
+  {
+    timestamps: true,
+    versionKey: false,
+  },
 );
 
-export default model("Review", ReviewSchema);
+ReviewSchema.index({ reviewerId: 1, orderId: 1 }, { unique: true });
+ReviewSchema.index({ targetUserId: 1, createdAt: -1 });
+ReviewSchema.index({ orderId: 1, createdAt: -1 });
+
+export default mongoose.model<IReview>("Review", ReviewSchema);

@@ -10,12 +10,16 @@ import { initSocket } from './shared/config/socket';
 import authRoutes from './modules/auth/routes/auth.routes';
 import categoryRoutes from './modules/category/routes/category.routes';
 import chatRoutes from './modules/chat/routes/chat.routes';
-import governmentRoutes from './modules/government/routes/Government.routes';
+import governmentRoutes from './modules/government/routes/government.routes';
 import notificationRoutes from './modules/notification/routes/notifications.routes';
 import offerRoutes from './modules/offer/routes/offer.routes';
 import orderRoutes from './modules/order/routes/order.routes';
 import reviewRoutes from './modules/review/routes/review.routes';
 import sessionRoutes from './modules/session/routes/session.routes';
+import availabilityRoutes from './modules/availability/routes/availability.routes';
+import bundleRoutes from './modules/bundle/routes/bundle.routes';
+import bundleBookingRoutes from './modules/bundleBooking/routes/bundleBooking.routes';
+import callRoutes from './modules/call/routes/call.routes';
 
 dotenv.config();
 
@@ -62,6 +66,10 @@ app.use("/api/offers", offerRoutes);
 app.use("/api/orders", orderRoutes);
 app.use("/api/reviews", reviewRoutes);
 app.use("/api/sessions", sessionRoutes);
+app.use("/api/availability", availabilityRoutes);
+app.use("/api/bundles", bundleRoutes);
+app.use("/api/bundle-bookings", bundleBookingRoutes);
+app.use("/api/calls", callRoutes);
 
 app.use((err: any, req: any, res: any, next: any) => {
   if (res.headersSent) return next(err);

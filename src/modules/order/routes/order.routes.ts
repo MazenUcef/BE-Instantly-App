@@ -1,24 +1,73 @@
 import { Router } from "express";
-import { checkPendingOrders, createOrder, deleteOrder, getActiveOrdersByCategory, getCustomerOrderHistory, getOrderDetails, updateOrderPrice } from "../controllers/order.controller";
 import { authenticate, authorize } from "../../../shared/middlewares/auth";
-import { validateCreateOrder } from "../../../shared/middlewares/validate";
-
+import {
+  checkPendingOrders,
+  createOrder,
+  deleteOrder,
+  getActiveOrdersByCategory,
+  getCustomerOrderHistory,
+  getOrderDetails,
+  updateOrderPrice,
+} from "../controllers/order.controller";
+import {
+  validateCreateOrder,
+  validateOrderHistoryQuery,
+  validateOrderIdParam,
+  validateUpdateOrderPrice,
+} from "../validators/order.validation";
 
 const router = Router();
 
-router.post("/", authenticate, authorize("customer"), validateCreateOrder, createOrder);
+router.post(
+  "/",
+  authenticate,
+  authorize("customer"),
+  validateCreateOrder,
+  createOrder,
+);
 
-router.delete("/:id", authenticate, authorize("customer"), deleteOrder);
+router.get(
+  "/history",
+  authenticate,
+  authorize("customer"),
+  validateOrderHistoryQuery,
+  getCustomerOrderHistory,
+);
 
-router.get("/history", authenticate, authorize("customer"), getCustomerOrderHistory);
+router.get(
+  "/active",
+  authenticate,
+  authorize("supplier"),
+  getActiveOrdersByCategory,
+);
 
-router.get("/active", authenticate, authorize("supplier"), getActiveOrdersByCategory);
-router.patch("/:id/price", authenticate, authorize("customer"), updateOrderPrice);
-router.get('/check-pending', authenticate, checkPendingOrders);
+router.get(
+  "/check-pending",
+  authenticate,
+  checkPendingOrders,
+);
 
+router.get(
+  "/:id",
+  authenticate,
+  validateOrderIdParam,
+  getOrderDetails,
+);
 
+router.patch(
+  "/:id/price",
+  authenticate,
+  authorize("customer"),
+  validateUpdateOrderPrice,
+  updateOrderPrice,
+);
 
-
-router.get("/:id", authenticate, getOrderDetails);
+router.delete(
+  "/:id",
+  authenticate,
+  authorize("customer"),
+  validateOrderIdParam,
+  deleteOrder,
+);
 
 export default router;

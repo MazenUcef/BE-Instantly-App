@@ -1,44 +1,76 @@
 import { Router } from "express";
+import { authenticate, authorize } from "../../../shared/middlewares/auth";
 import {
-  createOffer,
   acceptOffer,
-  rejectOffer,
-  getOffersByOrder,
   acceptOrderDirect,
+  createOffer,
   deleteOffer,
   getAcceptedOfferHistory,
+  getOffersByOrder,
   getSupplierPendingOffers,
+  rejectOffer,
 } from "../controllers/offer.controller";
-import { authenticate, authorize } from "../../../shared/middlewares/auth";
+import {
+  validateCreateOffer,
+  validateOfferHistoryQuery,
+  validateOfferIdParam,
+  validateOrderIdParam,
+} from "../validation/offer.validation";
 
 const router = Router();
 
-router.post("/", authenticate, authorize("supplier"), createOffer);
+router.post(
+  "/",
+  authenticate,
+  authorize("supplier"),
+  validateCreateOffer,
+  createOffer,
+);
 
-router.put("/accept/:id", authenticate, authorize("customer"), acceptOffer);
+router.put(
+  "/accept/:id",
+  authenticate,
+  authorize("customer"),
+  validateOfferIdParam,
+  acceptOffer,
+);
 
-router.put("/reject/:id", authenticate, authorize("customer"), rejectOffer);
+router.put(
+  "/reject/:id",
+  authenticate,
+  authorize("customer"),
+  validateOfferIdParam,
+  rejectOffer,
+);
 
-router.get("/order/:orderId", authenticate, getOffersByOrder);
+router.get(
+  "/order/:orderId",
+  authenticate,
+  validateOrderIdParam,
+  getOffersByOrder,
+);
 
 router.get(
   "/supplier/history",
   authenticate,
   authorize("supplier"),
-  getAcceptedOfferHistory
+  validateOfferHistoryQuery,
+  getAcceptedOfferHistory,
 );
 
 router.delete(
   "/:id",
   authenticate,
   authorize("supplier"),
-  deleteOffer
+  validateOfferIdParam,
+  deleteOffer,
 );
 
 router.post(
   "/accept-order-direct/:orderId",
   authenticate,
   authorize("supplier"),
+  validateOrderIdParam,
   acceptOrderDirect,
 );
 
@@ -46,7 +78,8 @@ router.get(
   "/supplier/pending",
   authenticate,
   authorize("supplier"),
-  getSupplierPendingOffers
+  validateOfferHistoryQuery,
+  getSupplierPendingOffers,
 );
 
 export default router;
