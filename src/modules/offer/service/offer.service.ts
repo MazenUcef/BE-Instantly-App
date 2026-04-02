@@ -1,6 +1,6 @@
 import mongoose from "mongoose";
 import UserModel from "../../auth/models/User.model";
-import OrderModel from "../../order/models/order.model";
+import orderModel from "../../order/models/order.model";
 import sessionModel from "../../session/models/session.model";
 import { AppError } from "../../../shared/middlewares/errorHandler";
 import { OfferEventService } from "./offer-event.service";
@@ -21,7 +21,7 @@ export class OfferService {
     dbSession?: any,
   ) {
     const [reviewRequiredOrder, activeAcceptedOffer] = await Promise.all([
-      OrderModel.findOne({
+      orderModel.findOne({
         supplierId,
         status: ORDER_STATUS.COMPLETED,
         supplierReviewed: false,
@@ -66,7 +66,7 @@ export class OfferService {
   }
 
   private static async validateOrderForOfferCreation(orderId: string) {
-    const order = await OrderModel.findById(orderId);
+    const order = await orderModel.findById(orderId);
 
     if (!order) {
       throw new AppError("Order not found", 404);
@@ -101,7 +101,7 @@ export class OfferService {
       await dbSession.withTransaction(async () => {
         await this.ensureSupplierCanCreateOffer(supplierId, dbSession);
 
-        order = await OrderModel.findById(orderId).session(dbSession || null);
+        order = await orderModel.findById(orderId).session(dbSession || null);
         if (!order) {
           throw new AppError("Order not found", 404);
         }
@@ -234,7 +234,7 @@ export class OfferService {
           throw new AppError("Offer not found or already processed", 409);
         }
 
-        order = await OrderModel.findById(existingOffer.orderId).session(
+        order = await orderModel.findById(existingOffer.orderId).session(
           dbSession || null,
         );
 
@@ -393,7 +393,7 @@ export class OfferService {
     );
 
     for (const pendingOffer of supplierOtherPendingOffers) {
-      const pendingOrder = await OrderModel.findById(pendingOffer.orderId);
+      const pendingOrder = await orderModel.findById(pendingOffer.orderId);
       if (!pendingOrder) continue;
 
       io.to(socketRooms.user(pendingOrder.customerId.toString())).emit(
@@ -454,7 +454,7 @@ export class OfferService {
       throw new AppError("Offer not found", 404);
     }
 
-    const order = await OrderModel.findById(offer.orderId);
+    const order = await orderModel.findById(offer.orderId);
     if (!order) {
       throw new AppError("Associated order not found", 404);
     }
@@ -544,7 +544,7 @@ export class OfferService {
           );
         }
 
-        relatedOrder = await OrderModel.findById(existingOffer.orderId).session(
+        relatedOrder = await orderModel.findById(existingOffer.orderId).session(
           dbSession || null,
         );
 
@@ -768,7 +768,7 @@ export class OfferService {
   }) {
     const { orderId, userId, role } = input;
 
-    const order = await OrderModel.findById(orderId);
+    const order = await orderModel.findById(orderId);
     if (!order) {
       throw new AppError("Order not found", 404);
     }
@@ -814,7 +814,7 @@ export class OfferService {
       await dbSession.withTransaction(async () => {
         await this.ensureSupplierCanCreateOffer(supplierId, dbSession);
 
-        order = await OrderModel.findById(orderId).session(dbSession || null);
+        order = await orderModel.findById(orderId).session(dbSession || null);
 
         if (!order) {
           throw new AppError("Order not found", 404);
@@ -989,7 +989,7 @@ export class OfferService {
     const enrichedOffers = await Promise.all(
       offers.map(async (offer: any) => {
         const [order, session] = await Promise.all([
-          OrderModel.findById(offer.orderId),
+          orderModel.findById(offer.orderId),
           sessionModel.findOne({ offerId: offer._id }),
         ]);
 
@@ -1030,7 +1030,7 @@ export class OfferService {
 
     const enrichedOffers = await Promise.all(
       offers.map(async (offer: any) => {
-        const order = await OrderModel.findById(offer.orderId).lean();
+        const order = await orderModel.findById(offer.orderId).lean();
 
         return {
           ...offer.toObject(),

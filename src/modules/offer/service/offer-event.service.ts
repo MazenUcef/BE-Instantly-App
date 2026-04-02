@@ -2,7 +2,7 @@ import { getIO, socketEvents, socketRooms } from "../../../shared/config/socket"
 import { publishNotification } from "../../notification/notification.publisher";
 import { buildSupplierOrderPayload } from "../../../shared/utils/buildSupplierOrderPayload";
 import UserModel from "../../auth/models/User.model";
-import OrderModel from "../../order/models/order.model";
+import orderModel from "../../order/models/order.model";
 import { OFFER_NOTIFICATION_TYPES } from "../../../shared/constants/offer.constants";
 import { OfferRepository } from "../repository/offer.repository";
 
@@ -71,7 +71,7 @@ export class OfferEventService {
 
     const enriched = await Promise.all(
       offers.map(async (offer: any) => {
-        const order = await OrderModel.findById(offer.orderId).lean();
+        const order = await orderModel.findById(offer.orderId).lean();
         return {
           ...offer.toObject(),
           order: order || null,

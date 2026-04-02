@@ -3,8 +3,8 @@ import OrderModel from "../models/order.model";
 import sessionModel from "../../session/models/session.model";
 import UserModel from "../../auth/models/User.model";
 import OfferModel from "../../offer/models/offer.model";
-import GovernmentModel from "../../government/models/government.model";
-import CategoryModel from "../../category/models/category.model";
+import governmentModel from "../../government/models/government.model";
+import categoryModel from "../../category/models/category.model";
 import { AppError } from "../../../shared/middlewares/errorHandler";
 import { OrderRepository } from "../repositories/order.repository";
 import { OrderEventService } from "./order-event.service";
@@ -21,8 +21,8 @@ export class OrderService {
     jobTitle: string;
   }) {
     const [government, category] = await Promise.all([
-      GovernmentModel.findById(input.governmentId),
-      CategoryModel.findById(input.categoryId),
+      governmentModel.findById(input.governmentId),
+      categoryModel.findById(input.categoryId),
     ]);
 
     if (!government) {

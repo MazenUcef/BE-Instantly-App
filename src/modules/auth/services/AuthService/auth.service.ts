@@ -14,8 +14,6 @@ import {
 import { publishNotification } from "../../../notification/notification.publisher";
 import { AuthTokenService } from "../auth-token.service";
 import { AppError } from "../../../../shared/middlewares/errorHandler";
-import GovernmentModel from "../../../government/models/government.model";
-import CategoryModel from "../../../category/models/category.model";
 import { publishToQueue } from "../../../../shared/config/rabbitmq";
 import redis from "../../../../shared/config/redis";
 import {
@@ -26,6 +24,8 @@ import { verifyRefreshToken } from "../../../../shared/utils/token";
 import { uploadToCloudinary } from "../../../../shared/utils/cloudinary";
 import { validateFile } from "../../../../shared/utils/helpers";
 import { Request } from "express";
+import governmentModel from "../../../government/models/government.model";
+import categoryModel from "../../../category/models/category.model";
 
 const sanitizeUser = (user: any) => {
   const obj = user.toObject ? user.toObject() : user;
@@ -100,10 +100,10 @@ export class AuthService {
           }
 
           const [governments, category] = await Promise.all([
-            GovernmentModel.find({ _id: { $in: data.governmentIds } }).session(
+            governmentModel.find({ _id: { $in: data.governmentIds } }).session(
               session,
             ),
-            CategoryModel.findById(data.categoryId).session(session),
+            categoryModel.findById(data.categoryId).session(session),
           ]);
 
           if (governments.length !== data.governmentIds.length) {
@@ -392,7 +392,7 @@ export class AuthService {
     let governments: any[] = [];
 
     if (user.governmentIds?.length > 0) {
-      const govs = await GovernmentModel.find({
+      const govs = await governmentModel.find({
         _id: { $in: user.governmentIds },
         isActive: true,
       }).sort({ order: 1 });
@@ -411,7 +411,7 @@ export class AuthService {
         throw new AppError("Supplier account missing category", 400);
       }
 
-      const categoryDoc = await CategoryModel.findById(user.categoryId);
+      const categoryDoc = await categoryModel.findById(user.categoryId);
       if (!categoryDoc) {
         throw new AppError("User category not found", 400);
       }
@@ -660,7 +660,7 @@ export class AuthService {
           }
 
           const category =
-            await CategoryModel.findById(finalCategoryId).session(dbSession);
+            await categoryModel.findById(finalCategoryId).session(dbSession);
           if (!category) {
             throw new AppError("Invalid category", 400);
           }
@@ -692,7 +692,7 @@ export class AuthService {
             );
           }
 
-          const governments = await GovernmentModel.find({
+          const governments = await governmentModel.find({
             _id: { $in: finalGovernmentIds },
           }).session(dbSession);
 

@@ -1,13 +1,13 @@
-import mongoose from "mongoose";
 import UserModel from "../../auth/models/User.model";
-import OfferModel from "../../offer/models/offer.model";
-import OrderModel from "../../order/models/order.model";
+
 import bundleBookingModel from "../../bundleBooking/models/bundleBooking.model";
 import { AppError } from "../../../shared/middlewares/errorHandler";
 import { AvailabilityRepository } from "../repositories/availability.repository";
 
 import { generateSlots, overlapsTimeRange } from "../../../shared/utils/calendar";
 import { ACTIVE_BOOKING_STATUSES, ACTIVE_OFFER_STATUSES_FOR_CALENDAR, DEFAULT_ACCEPTED_JOB_DURATION_MINUTES, DEFAULT_AVAILABILITY_TIMEZONE } from "../../../shared/constants/availability.constants";
+import orderModel from "../../order/models/order.model";
+import offerModel from "../../offer/models/offer.model";
 
 const getDateOnly = (date: Date | string) => {
   const d = new Date(date);
@@ -265,7 +265,7 @@ export class AvailabilityService {
       return true;
     });
 
-    const acceptedOffers = await OfferModel.find({
+    const acceptedOffers = await offerModel.find({
       supplierId,
       status: { $in: [...ACTIVE_OFFER_STATUSES_FOR_CALENDAR] },
       timeToStart: { $exists: true, $ne: null },
@@ -277,7 +277,7 @@ export class AvailabilityService {
     });
 
     const orderIds = acceptedJobsForDate.map((offer) => offer.orderId);
-    const orders = await OrderModel.find({ _id: { $in: orderIds } }).lean();
+    const orders = await orderModel.find({ _id: { $in: orderIds } }).lean();
 
     slots = slots.filter((slot) => {
       for (const offer of acceptedJobsForDate) {

@@ -1,7 +1,7 @@
 import UserModel from "../../modules/auth/models/User.model";
 import bundleModel from "../../modules/bundle/models/bundle.model";
-import CategoryModel from "../../modules/category/models/category.model";
-import GovernmentModel from "../../modules/government/models/government.model";
+import categoryModel from "../../modules/category/models/category.model";
+import governmentModel from "../../modules/government/models/government.model";
 import { AppError } from "../middlewares/errorHandler";
 
 export const validateFile = (file: Express.Multer.File) => {
@@ -25,8 +25,8 @@ export const buildBundlePayload = async (bundleId: string) => {
     UserModel.findById(bundle.supplierId)
       .select("-password -refreshToken -biometrics")
       .lean(),
-    CategoryModel.findById(bundle.categoryId).lean(),
-    GovernmentModel.find({
+    categoryModel.findById(bundle.categoryId).lean(),
+    governmentModel.find({
       _id: { $in: bundle.governmentIds || [] },
       isActive: true,
     }).lean(),

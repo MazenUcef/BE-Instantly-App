@@ -1,20 +1,20 @@
 import UserModel from "../../modules/auth/models/User.model";
-import CategoryModel from "../../modules/category/models/category.model";
-import GovernmentModel from "../../modules/government/models/government.model";
-import OrderModel from "../../modules/order/models/order.model";
+import categoryModel from "../../modules/category/models/category.model";
+import governmentModel from "../../modules/government/models/government.model";
+import orderModel from "../../modules/order/models/order.model";
 
 
 export const buildSupplierOrderPayload = async (orderId: string) => {
-  const order = await OrderModel.findById(orderId)
+  const order = await orderModel.findById(orderId)
     .populate({
       path: "governmentId",
       select: "name nameAr country isActive",
-      model: GovernmentModel,
+      model: governmentModel,
     })
     .populate({
       path: "categoryId",
       select: "name description icon jobs",
-      model: CategoryModel,
+      model: categoryModel,
     });
 
   if (!order) return null;
