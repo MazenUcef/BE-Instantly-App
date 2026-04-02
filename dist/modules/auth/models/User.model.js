@@ -34,67 +34,90 @@ var __importStar = (this && this.__importStar) || (function () {
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
 const mongoose_1 = __importStar(require("mongoose"));
+const auth_constants_1 = require("../../../shared/constants/auth.constants");
+const UserBiometricSchema = new mongoose_1.Schema({
+    deviceId: { type: String, required: true, trim: true },
+    type: {
+        type: String,
+        enum: Object.values(auth_constants_1.BIOMETRIC_TYPES),
+        required: true,
+    },
+    passcodeHash: { type: String, default: null },
+    createdAt: { type: Date, default: Date.now },
+}, { _id: false });
 const UserSchema = new mongoose_1.Schema({
-    firstName: { type: String, required: true },
-    lastName: { type: String, required: true },
-    email: { type: String, required: true, unique: true },
-    phoneNumber: { type: String, required: true, unique: true },
+    firstName: { type: String, required: true, trim: true },
+    lastName: { type: String, required: true, trim: true },
+    email: {
+        type: String,
+        required: true,
+        unique: true,
+        lowercase: true,
+        trim: true,
+    },
+    phoneNumber: {
+        type: String,
+        required: true,
+        unique: true,
+        trim: true,
+    },
     password: { type: String, required: true },
     role: {
         type: String,
-        enum: ["customer", "supplier", "admin"],
-        default: "customer",
+        enum: Object.values(auth_constants_1.AUTH_ROLES),
+        default: auth_constants_1.AUTH_ROLES.CUSTOMER,
+        index: true,
     },
     categoryId: {
         type: mongoose_1.Schema.Types.ObjectId,
-        required: false,
+        ref: "Category",
         default: null,
+        index: true,
     },
-    address: { type: String, required: true },
-    governmentIds: [{
+    address: {
+        type: String,
+        required: true,
+        trim: true,
+    },
+    governmentIds: [
+        {
             type: mongoose_1.Schema.Types.ObjectId,
             ref: "Government",
-            required: false,
-        }],
-    profilePicture: String,
-    isEmailVerified: { type: Boolean, default: false },
-    isPhoneVerified: { type: Boolean, default: false },
-    isProfileComplete: { type: Boolean, default: false },
-    refreshToken: String,
-    biometrics: [
-        {
-            deviceId: { type: String, required: true },
-            type: {
-                type: String,
-                enum: ["faceid", "fingerprint", "passcode"],
-                required: true,
-            },
-            passcodeHash: { type: String },
-            createdAt: { type: Date, default: Date.now },
         },
     ],
+    profilePicture: {
+        type: String,
+        default: null,
+        required: true,
+    },
+    isEmailVerified: { type: Boolean, default: false, index: true },
+    isPhoneVerified: { type: Boolean, default: false },
+    isProfileComplete: { type: Boolean, default: false, index: true },
+    biometrics: {
+        type: [UserBiometricSchema],
+        default: [],
+    },
     averageRating: {
         type: Number,
         default: 0,
+        min: 0,
     },
     totalReviews: {
         type: Number,
         default: 0,
+        min: 0,
     },
     jobTitles: {
         type: [String],
-        required: false,
         default: [],
     },
-    reviews: [
-        {
-            reviewerId: String,
-            reviewerName: String,
-            rating: Number,
-            comment: String,
-            createdAt: Date,
-        },
-    ],
-}, { timestamps: true });
-UserSchema.index({ governmentIds: 1 });
+}, {
+    timestamps: true,
+    versionKey: false,
+});
+UserSchema.index({ governmentIds: 1, role: 1 });
+UserSchema.index({ role: 1, categoryId: 1 });
+UserSchema.index({ email: 1 }, { unique: true });
+UserSchema.index({ phoneNumber: 1 }, { unique: true });
+UserSchema.index({ "biometrics.deviceId": 1 });
 exports.default = mongoose_1.default.model("User", UserSchema);

@@ -38,9 +38,20 @@ const errorHandler = (err, req, res, next) => {
     }
     const statusCode = error.statusCode || 500;
     const message = error.message || 'Internal Server Error';
+    // Include additional properties if they exist on the error
+    const additionalData = {};
+    if (error.reviewRequired)
+        additionalData.reviewRequired = error.reviewRequired;
+    if (error.order)
+        additionalData.order = error.order;
+    if (error.availableJobTitles)
+        additionalData.availableJobTitles = error.availableJobTitles;
+    if (error.callId)
+        additionalData.callId = error.callId;
     res.status(statusCode).json({
         success: false,
         message,
+        ...additionalData,
         ...(process.env.NODE_ENV === 'development' && { stack: err.stack })
     });
 };

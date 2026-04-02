@@ -281,7 +281,7 @@ export class AvailabilityService {
 
     slots = slots.filter((slot) => {
       for (const offer of acceptedJobsForDate) {
-        const order = orders.find((o) => String(o._id) === String(offer.orderId));
+        const order = orders.find((o: any) => String(o._id) === String(offer.orderId));
         void order;
 
         const start = offer.timeToStart ? new Date(offer.timeToStart) : null;

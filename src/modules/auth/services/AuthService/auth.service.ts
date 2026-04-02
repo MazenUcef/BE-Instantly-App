@@ -397,7 +397,7 @@ export class AuthService {
         isActive: true,
       }).sort({ order: 1 });
 
-      governments = govs.map((gov) => ({
+      governments = govs.map((gov: any) => ({
         id: gov._id,
         name: gov.name,
         nameAr: gov.nameAr,

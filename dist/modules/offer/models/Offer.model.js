@@ -34,24 +34,88 @@ var __importStar = (this && this.__importStar) || (function () {
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
 const mongoose_1 = __importStar(require("mongoose"));
+const offer_constants_1 = require("../../../shared/constants/offer.constants");
 const OfferSchema = new mongoose_1.Schema({
-    orderId: { type: mongoose_1.Schema.Types.ObjectId, required: true, ref: "Order" },
-    supplierId: { type: mongoose_1.Schema.Types.ObjectId, required: true, ref: "User" },
-    type: { type: String, enum: ["price", "proposal"], required: true },
-    amount: { type: Number, required: true },
+    orderId: {
+        type: mongoose_1.Schema.Types.ObjectId,
+        ref: "Order",
+        required: true,
+        index: true,
+    },
+    supplierId: {
+        type: mongoose_1.Schema.Types.ObjectId,
+        ref: "User",
+        required: true,
+        index: true,
+    },
+    amount: {
+        type: Number,
+        required: true,
+        min: 1,
+    },
+    timeRange: {
+        type: String,
+        default: null,
+        trim: true,
+        maxlength: 200,
+    },
     timeToStart: {
         type: Date,
-        required: false,
+        default: null,
     },
-    timeRange: { type: String },
     status: {
         type: String,
-        enum: ["pending", "accepted", "rejected", "expired"],
-        default: "pending",
+        enum: Object.values(offer_constants_1.OFFER_STATUS),
+        default: offer_constants_1.OFFER_STATUS.PENDING,
+        index: true,
     },
     expiresAt: {
         type: Date,
         default: null,
+        index: true,
     },
-}, { timestamps: true });
+    acceptedAt: {
+        type: Date,
+        default: null,
+    },
+    rejectedAt: {
+        type: Date,
+        default: null,
+    },
+    withdrawnAt: {
+        type: Date,
+        default: null,
+    },
+}, {
+    timestamps: true,
+    versionKey: false,
+});
+OfferSchema.index({ orderId: 1, status: 1, createdAt: -1 });
+OfferSchema.index({ supplierId: 1, status: 1, createdAt: -1 });
+OfferSchema.index({ supplierId: 1, updatedAt: -1 });
+OfferSchema.index({ expiresAt: 1 }, {
+    expireAfterSeconds: 0,
+    partialFilterExpression: { expiresAt: { $type: "date" } },
+});
+OfferSchema.index({ orderId: 1, supplierId: 1, status: 1 }, {
+    unique: true,
+    partialFilterExpression: {
+        status: offer_constants_1.OFFER_STATUS.PENDING,
+    },
+    name: "uniq_supplier_pending_offer_per_order",
+});
+OfferSchema.index({ orderId: 1, status: 1 }, {
+    unique: true,
+    partialFilterExpression: {
+        status: offer_constants_1.OFFER_STATUS.ACCEPTED,
+    },
+    name: "uniq_order_single_accepted_offer",
+});
+OfferSchema.index({ supplierId: 1, status: 1 }, {
+    unique: true,
+    partialFilterExpression: {
+        status: offer_constants_1.OFFER_STATUS.ACCEPTED,
+    },
+    name: "uniq_supplier_single_active_accepted_offer",
+});
 exports.default = mongoose_1.default.model("Offer", OfferSchema);

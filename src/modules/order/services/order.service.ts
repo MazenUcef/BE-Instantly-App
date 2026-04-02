@@ -463,11 +463,11 @@ export class OrderService {
     ]);
 
     const orderIdsWithOffers = new Set(
-      supplierPendingOffers.map((offer) => offer.orderId.toString()),
+      supplierPendingOffers.map((offer: any) => offer.orderId.toString()),
     );
 
     const payloads = await Promise.all(
-      allPendingOrders.map((order) =>
+      allPendingOrders.map((order: any) =>
         buildSupplierOrderPayload(order._id.toString()),
       ),
     );

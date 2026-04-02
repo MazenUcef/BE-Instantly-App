@@ -38,27 +38,54 @@ const GovernmentSchema = new mongoose_1.Schema({
     name: {
         type: String,
         required: true,
-        unique: true,
         trim: true,
+        minlength: 2,
+        maxlength: 100,
     },
     nameAr: {
         type: String,
         required: true,
-        unique: true,
         trim: true,
+        minlength: 2,
+        maxlength: 100,
+    },
+    normalizedName: {
+        type: String,
+        required: true,
+        trim: true,
+        lowercase: true,
+        unique: true,
+        index: true,
+    },
+    normalizedNameAr: {
+        type: String,
+        required: true,
+        trim: true,
+        unique: true,
+        index: true,
     },
     country: {
         type: String,
         default: "Egypt",
+        trim: true,
+        maxlength: 100,
     },
     isActive: {
         type: Boolean,
         default: true,
+        index: true,
     },
     order: {
         type: Number,
         default: 0,
+        min: 0,
+        index: true,
     },
-}, { timestamps: true });
-GovernmentSchema.index({ isActive: 1 });
+}, {
+    timestamps: true,
+    versionKey: false,
+});
+GovernmentSchema.index({ isActive: 1, order: 1, name: 1 });
+GovernmentSchema.index({ normalizedName: 1 }, { unique: true });
+GovernmentSchema.index({ normalizedNameAr: 1 }, { unique: true });
 exports.default = mongoose_1.default.model("Government", GovernmentSchema);

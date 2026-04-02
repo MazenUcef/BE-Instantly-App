@@ -1,0 +1,15 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+const express_1 = require("express");
+const auth_1 = require("../../../shared/middlewares/auth");
+const bundle_controller_1 = require("../controllers/bundle.controller");
+const bundle_validation_1 = require("../validators/bundle.validation");
+const router = (0, express_1.Router)();
+router.get("/", auth_1.authenticate, bundle_validation_1.validateGetBundlesQuery, bundle_controller_1.getAllBundles);
+router.get("/me", auth_1.authenticate, (0, auth_1.authorize)("supplier"), bundle_controller_1.getMyBundles);
+router.get("/:id", auth_1.authenticate, bundle_validation_1.validateBundleIdParam, bundle_controller_1.getBundleById);
+router.post("/", auth_1.authenticate, (0, auth_1.authorize)("supplier"), bundle_validation_1.validateCreateBundle, bundle_controller_1.createBundle);
+router.put("/:id", auth_1.authenticate, (0, auth_1.authorize)("supplier"), bundle_validation_1.validateUpdateBundle, bundle_controller_1.updateBundle);
+router.patch("/:id/toggle-status", auth_1.authenticate, (0, auth_1.authorize)("supplier"), bundle_validation_1.validateBundleIdParam, bundle_controller_1.toggleBundleStatus);
+router.delete("/:id", auth_1.authenticate, (0, auth_1.authorize)("supplier"), bundle_validation_1.validateBundleIdParam, bundle_controller_1.deleteBundle);
+exports.default = router;

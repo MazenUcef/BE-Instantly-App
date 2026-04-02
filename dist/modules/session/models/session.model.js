@@ -34,23 +34,118 @@ var __importStar = (this && this.__importStar) || (function () {
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
 const mongoose_1 = __importStar(require("mongoose"));
+const session_constants_1 = require("../../../shared/constants/session.constants");
 const JobSessionSchema = new mongoose_1.Schema({
-    orderId: { type: mongoose_1.Schema.Types.ObjectId, required: true },
-    offerId: { type: mongoose_1.Schema.Types.ObjectId, required: true },
-    customerId: { type: mongoose_1.Schema.Types.ObjectId, required: true },
-    supplierId: { type: mongoose_1.Schema.Types.ObjectId, required: true },
+    orderId: {
+        type: mongoose_1.Schema.Types.ObjectId,
+        ref: "Order",
+        required: true,
+        index: true,
+    },
+    offerId: {
+        type: mongoose_1.Schema.Types.ObjectId,
+        ref: "Offer",
+        required: true,
+        index: true,
+    },
+    customerId: {
+        type: mongoose_1.Schema.Types.ObjectId,
+        ref: "User",
+        required: true,
+        index: true,
+    },
+    supplierId: {
+        type: mongoose_1.Schema.Types.ObjectId,
+        ref: "User",
+        required: true,
+        index: true,
+    },
+    paymentConfirmed: {
+        type: Boolean,
+        default: false,
+        index: true,
+    },
+    paymentConfirmedAt: {
+        type: Date,
+        default: null,
+    },
     status: {
         type: String,
-        enum: [
-            "started",
-            "on_the_way",
-            "arrived",
-            "work_started",
-            "completed",
-            "cancelled",
-            "done",
-        ],
-        default: "started",
+        enum: Object.values(session_constants_1.SESSION_STATUS),
+        default: session_constants_1.SESSION_STATUS.STARTED,
+        index: true,
     },
-}, { timestamps: true });
+    cancelledBy: {
+        type: String,
+        enum: ["customer", "supplier", null],
+        default: null,
+    },
+    cancellationReason: {
+        type: String,
+        default: null,
+        trim: true,
+        maxlength: 500,
+    },
+    startedAt: {
+        type: Date,
+        default: () => new Date(),
+    },
+    onTheWayAt: {
+        type: Date,
+        default: null,
+    },
+    arrivedAt: {
+        type: Date,
+        default: null,
+    },
+    workStartedAt: {
+        type: Date,
+        default: null,
+    },
+    completedAt: {
+        type: Date,
+        default: null,
+    },
+    cancelledAt: {
+        type: Date,
+        default: null,
+    },
+}, {
+    timestamps: true,
+    versionKey: false,
+});
+JobSessionSchema.index({ orderId: 1 }, { unique: true });
+JobSessionSchema.index({ offerId: 1 }, { unique: true });
+JobSessionSchema.index({ customerId: 1, status: 1, updatedAt: -1 });
+JobSessionSchema.index({ supplierId: 1, status: 1, updatedAt: -1 });
+JobSessionSchema.index({ status: 1, updatedAt: -1 });
+// Optional protection: only one active session per customer
+JobSessionSchema.index({ customerId: 1, status: 1 }, {
+    unique: true,
+    partialFilterExpression: {
+        status: {
+            $in: [
+                session_constants_1.SESSION_STATUS.STARTED,
+                session_constants_1.SESSION_STATUS.ON_THE_WAY,
+                session_constants_1.SESSION_STATUS.ARRIVED,
+                session_constants_1.SESSION_STATUS.WORK_STARTED,
+            ],
+        },
+    },
+    name: "uniq_customer_single_active_session",
+});
+JobSessionSchema.index({ supplierId: 1, status: 1 }, {
+    unique: true,
+    partialFilterExpression: {
+        status: {
+            $in: [
+                session_constants_1.SESSION_STATUS.STARTED,
+                session_constants_1.SESSION_STATUS.ON_THE_WAY,
+                session_constants_1.SESSION_STATUS.ARRIVED,
+                session_constants_1.SESSION_STATUS.WORK_STARTED,
+            ],
+        },
+    },
+    name: "uniq_supplier_single_active_session",
+});
 exports.default = mongoose_1.default.model("JobSession", JobSessionSchema);

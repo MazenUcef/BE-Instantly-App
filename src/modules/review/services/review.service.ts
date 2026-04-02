@@ -21,7 +21,7 @@ export class ReviewService {
     const dbSession = await mongoose.startSession();
 
     let createdReview: any = null;
-    let targetUserId: string | null = null;
+    let targetUserId: string = "";
     let reviewerName = "Someone";
     let averageRating = 0;
     let totalReviews = 0;

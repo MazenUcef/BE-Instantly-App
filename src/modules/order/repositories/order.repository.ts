@@ -19,7 +19,7 @@ export class OrderRepository {
     },
     session?: ClientSession,
   ) {
-    return OrderModel.create([data], { session }).then((docs) => docs[0]);
+    return OrderModel.create([data], { session }).then((docs: any[]) => docs[0]);
   }
 
   static findById(orderId: Types.ObjectId | string, session?: ClientSession) {

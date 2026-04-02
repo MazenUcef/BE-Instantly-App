@@ -16,12 +16,16 @@ const socket_1 = require("./shared/config/socket");
 const auth_routes_1 = __importDefault(require("./modules/auth/routes/auth.routes"));
 const category_routes_1 = __importDefault(require("./modules/category/routes/category.routes"));
 const chat_routes_1 = __importDefault(require("./modules/chat/routes/chat.routes"));
-const Government_routes_1 = __importDefault(require("./modules/government/routes/Government.routes"));
+const government_routes_1 = __importDefault(require("./modules/government/routes/government.routes"));
 const notifications_routes_1 = __importDefault(require("./modules/notification/routes/notifications.routes"));
 const offer_routes_1 = __importDefault(require("./modules/offer/routes/offer.routes"));
 const order_routes_1 = __importDefault(require("./modules/order/routes/order.routes"));
 const review_routes_1 = __importDefault(require("./modules/review/routes/review.routes"));
 const session_routes_1 = __importDefault(require("./modules/session/routes/session.routes"));
+const availability_routes_1 = __importDefault(require("./modules/availability/routes/availability.routes"));
+const bundle_routes_1 = __importDefault(require("./modules/bundle/routes/bundle.routes"));
+const bundleBooking_routes_1 = __importDefault(require("./modules/bundleBooking/routes/bundleBooking.routes"));
+const call_routes_1 = __importDefault(require("./modules/call/routes/call.routes"));
 dotenv_1.default.config();
 const app = (0, express_1.default)();
 exports.app = app;
@@ -52,13 +56,17 @@ app.get('/health', (req, res) => {
 });
 app.use('/api/auth', auth_routes_1.default);
 app.use('/api/categories', category_routes_1.default);
-app.use("/api/governments", Government_routes_1.default);
+app.use("/api/governments", government_routes_1.default);
 app.use("/api/chat", chat_routes_1.default);
 app.use("/api/notifications", notifications_routes_1.default);
 app.use("/api/offers", offer_routes_1.default);
 app.use("/api/orders", order_routes_1.default);
 app.use("/api/reviews", review_routes_1.default);
 app.use("/api/sessions", session_routes_1.default);
+app.use("/api/availability", availability_routes_1.default);
+app.use("/api/bundles", bundle_routes_1.default);
+app.use("/api/bundle-bookings", bundleBooking_routes_1.default);
+app.use("/api/calls", call_routes_1.default);
 app.use((err, req, res, next) => {
     if (res.headersSent)
         return next(err);

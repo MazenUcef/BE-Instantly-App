@@ -34,40 +34,105 @@ var __importStar = (this && this.__importStar) || (function () {
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
 const mongoose_1 = __importStar(require("mongoose"));
+const order_constants_1 = require("../../../shared/constants/order.constants");
 const OrderSchema = new mongoose_1.Schema({
-    customerId: { type: String, required: true },
-    customerName: { type: String, required: true },
+    customerId: {
+        type: mongoose_1.Schema.Types.ObjectId,
+        ref: "User",
+        required: true,
+        index: true,
+    },
+    customerName: {
+        type: String,
+        required: true,
+        trim: true,
+        maxlength: 150,
+    },
+    supplierId: {
+        type: mongoose_1.Schema.Types.ObjectId,
+        ref: "User",
+        default: null,
+        index: true,
+    },
     categoryId: {
         type: mongoose_1.Schema.Types.ObjectId,
         ref: "Category",
-        required: true
+        required: true,
+        index: true,
     },
     governmentId: {
         type: mongoose_1.Schema.Types.ObjectId,
         ref: "Government",
-        required: true
+        required: true,
+        index: true,
     },
-    jobTitle: { type: String, required: true },
-    address: { type: String, required: true },
-    description: { type: String, required: true },
+    jobTitle: {
+        type: String,
+        required: true,
+        trim: true,
+        maxlength: 200,
+    },
+    address: {
+        type: String,
+        required: true,
+        trim: true,
+        maxlength: 500,
+    },
+    description: {
+        type: String,
+        required: true,
+        trim: true,
+        maxlength: 5000,
+    },
     requestedPrice: {
         type: Number,
         required: true,
         min: 1,
     },
+    orderType: {
+        type: String,
+        enum: Object.values(order_constants_1.ORDER_TYPE),
+        required: true,
+        default: order_constants_1.ORDER_TYPE.DAILY,
+    },
     timeToStart: {
         type: Date,
-        required: false,
+        default: null,
     },
     status: {
         type: String,
-        enum: ["pending", "in_progress", "completed"],
-        default: "pending",
+        enum: Object.values(order_constants_1.ORDER_STATUS),
+        default: order_constants_1.ORDER_STATUS.PENDING,
+        index: true,
     },
-    finalPrice: { type: Number },
-    customerReviewed: { type: Boolean, default: false },
-    supplierReviewed: { type: Boolean, default: false },
-}, { timestamps: true });
-OrderSchema.index({ customerId: 1, status: 1 });
-OrderSchema.index({ categoryId: 1, governmentId: 1 });
+    finalPrice: {
+        type: Number,
+        default: null,
+        min: 0,
+    },
+    customerReviewed: {
+        type: Boolean,
+        default: false,
+        index: true,
+    },
+    supplierReviewed: {
+        type: Boolean,
+        default: false,
+        index: true,
+    },
+}, {
+    timestamps: true,
+    versionKey: false,
+});
+OrderSchema.index({ categoryId: 1, governmentId: 1, status: 1, createdAt: -1 });
+OrderSchema.index({ customerId: 1, status: 1, createdAt: -1 });
+OrderSchema.index({ supplierId: 1, status: 1, updatedAt: -1 });
+OrderSchema.index({ customerId: 1, customerReviewed: 1, status: 1, updatedAt: -1 });
+OrderSchema.index({ customerId: 1, status: 1 }, {
+    unique: true,
+    partialFilterExpression: {
+        status: { $in: [order_constants_1.ORDER_STATUS.PENDING, order_constants_1.ORDER_STATUS.IN_PROGRESS] },
+    },
+    name: "uniq_customer_single_active_order",
+});
 exports.default = mongoose_1.default.model("Order", OrderSchema);
