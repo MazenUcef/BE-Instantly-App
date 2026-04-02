@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { authenticate, authorize } from "../../../shared/middlewares/auth";
 import { validateCreateGovernment, validateDeleteGovernment, validateGetGovernmentById, validateToggleGovernmentStatus, validateUpdateGovernment } from "../validation/government.validation";
-import { createGovernment, deleteGovernment, getAllGovernments, getAllGovernmentsAdmin, getGovernmentById, toggleGovernmentStatus, updateGovernment } from "../controller/government.controller";
+import { getAllGovernments, getAllGovernmentsAdmin, getGovernmentById, createGovernment, updateGovernment, deleteGovernment, toggleGovernmentStatus } from "../controller/government.controller";
 
 const router = Router();
 

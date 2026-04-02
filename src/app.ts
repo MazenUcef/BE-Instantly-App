@@ -10,7 +10,6 @@ import { initSocket } from './shared/config/socket';
 import authRoutes from './modules/auth/routes/auth.routes';
 import categoryRoutes from './modules/category/routes/category.routes';
 import chatRoutes from './modules/chat/routes/chat.routes';
-import governmentRoutes from './modules/government/routes/government.routes';
 import notificationRoutes from './modules/notification/routes/notifications.routes';
 import offerRoutes from './modules/offer/routes/offer.routes';
 import orderRoutes from './modules/order/routes/order.routes';
@@ -20,6 +19,7 @@ import availabilityRoutes from './modules/availability/routes/availability.route
 import bundleRoutes from './modules/bundle/routes/bundle.routes';
 import bundleBookingRoutes from './modules/bundleBooking/routes/bundleBooking.routes';
 import callRoutes from './modules/call/routes/call.routes';
+import governmentRoutes from './modules/government/routes/government.routes'
 
 dotenv.config();
 

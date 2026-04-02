@@ -31,7 +31,7 @@ export class AvailabilityService {
     return supplier;
   }
 
-  private static validateWeeklySchedule(weeklySchedule: any[]) {
+  private static validateWeeklySchedule(weeklySchedule: { dayOfWeek: number; isWorking: boolean; startTime?: string; endTime?: string; breakStart?: string; breakEnd?: string }[]) {
     const days = weeklySchedule.map((item) => item.dayOfWeek).sort((a, b) => a - b);
 
     if (days.length !== 7 || days.some((day, index) => day !== index)) {
@@ -86,7 +86,7 @@ export class AvailabilityService {
   static async upsertMyAvailability(input: {
     supplierId: string;
     timezone?: string;
-    weeklySchedule: any[];
+    weeklySchedule: { dayOfWeek: number; isWorking: boolean; startTime?: string; endTime?: string; breakStart?: string; breakEnd?: string }[];
   }) {
     const { supplierId, timezone, weeklySchedule } = input;
 
@@ -281,7 +281,7 @@ export class AvailabilityService {
 
     slots = slots.filter((slot) => {
       for (const offer of acceptedJobsForDate) {
-        const order = orders.find((o: any) => String(o._id) === String(offer.orderId));
+        const order = orders.find((o) => String(o._id) === String(offer.orderId));
         void order;
 
         const start = offer.timeToStart ? new Date(offer.timeToStart) : null;

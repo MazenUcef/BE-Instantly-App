@@ -41,7 +41,7 @@ export class CategoryRepository {
 
   static updateById(
     categoryId: string | Types.ObjectId,
-    updates: Record<string, any>,
+    updates: object,
     session?: ClientSession,
   ) {
     return categoryModel.findByIdAndUpdate(categoryId, updates, {
