@@ -1,5 +1,10 @@
 import mongoose, { Schema, Document, Types } from "mongoose";
-import { BUNDLE_BOOKING_STATUS, BundleBookingStatus } from "../../../shared/constants/bundleBooking.constants";
+import {
+  BUNDLE_BOOKING_STATUS,
+  BUNDLE_BOOKING_CANCELLED_BY,
+  BundleBookingStatus,
+  BundleBookingCancelledBy,
+} from "../../../shared/constants/bundleBooking.constants";
 
 
 export interface IBundleBooking extends Document {
@@ -19,7 +24,7 @@ export interface IBundleBooking extends Document {
   paymentConfirmedAt?: Date | null;
   finalPrice: number;
   rejectionReason?: string | null;
-  cancelledBy?: "customer" | "supplier" | null;
+  cancelledBy?: BundleBookingCancelledBy | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -114,7 +119,7 @@ const BundleBookingSchema = new Schema<IBundleBooking>(
     },
     cancelledBy: {
       type: String,
-      enum: ["customer", "supplier", null],
+      enum: [...Object.values(BUNDLE_BOOKING_CANCELLED_BY), null],
       default: null,
     },
   },

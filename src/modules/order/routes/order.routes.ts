@@ -1,9 +1,9 @@
 import { Router } from "express";
 import { authenticate, authorize } from "../../../shared/middlewares/auth";
 import {
+  cancelOrder,
   checkPendingOrders,
   createOrder,
-  deleteOrder,
   getActiveOrdersByCategory,
   getCustomerOrderHistory,
   getOrderDetails,
@@ -41,18 +41,9 @@ router.get(
   getActiveOrdersByCategory,
 );
 
-router.get(
-  "/check-pending",
-  authenticate,
-  checkPendingOrders,
-);
+router.get("/check-pending", authenticate, checkPendingOrders);
 
-router.get(
-  "/:id",
-  authenticate,
-  validateOrderIdParam,
-  getOrderDetails,
-);
+router.get("/:id", authenticate, validateOrderIdParam, getOrderDetails);
 
 router.patch(
   "/:id/price",
@@ -62,12 +53,12 @@ router.patch(
   updateOrderPrice,
 );
 
-router.delete(
-  "/:id",
+router.patch(
+  "/:id/cancel",
   authenticate,
   authorize("customer"),
   validateOrderIdParam,
-  deleteOrder,
+  cancelOrder,
 );
 
 export default router;

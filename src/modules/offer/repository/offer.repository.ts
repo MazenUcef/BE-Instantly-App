@@ -245,7 +245,9 @@ export class OfferRepository {
 
     return offerModel.find({
       supplierId,
-      status: OFFER_STATUS.ACCEPTED,
+      status: {
+        $in: [OFFER_STATUS.ACCEPTED, OFFER_STATUS.COMPLETED, OFFER_STATUS.WITHDRAWN],
+      },
     })
       .sort({ createdAt: -1 })
       .skip(skip)
@@ -257,7 +259,9 @@ export class OfferRepository {
   ) {
     return offerModel.countDocuments({
       supplierId,
-      status: OFFER_STATUS.ACCEPTED,
+      status: {
+        $in: [OFFER_STATUS.ACCEPTED, OFFER_STATUS.COMPLETED, OFFER_STATUS.WITHDRAWN],
+      },
     });
   }
 

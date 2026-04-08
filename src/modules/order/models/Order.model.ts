@@ -1,5 +1,12 @@
 import mongoose, { Schema, Document, Types } from "mongoose";
-import { ORDER_STATUS, ORDER_TYPE, OrderStatus, OrderType } from "../../../shared/constants/order.constants";
+import {
+  ORDER_STATUS,
+  ORDER_TYPE,
+  OrderStatus,
+  OrderType,
+  ORDER_CANCELLED_BY,
+  OrderCancelledBy,
+} from "../../../shared/constants/order.constants";
 
 export interface IOrder extends Document {
   customerId: Types.ObjectId;
@@ -17,6 +24,10 @@ export interface IOrder extends Document {
   customerReviewed: boolean;
   supplierReviewed: boolean;
   timeToStart?: Date | null;
+  cancelledBy?: OrderCancelledBy | null;
+  cancellationReason?: string | null;
+  cancelledAt?: Date | null;
+  completedAt?: Date | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -107,6 +118,24 @@ const orderSchema = new Schema<IOrder>(
       default: false,
       index: true,
     },
+    cancelledBy: {
+      type: String,
+      enum: Object.values(ORDER_CANCELLED_BY),
+      default: null,
+    },
+    cancellationReason: {
+      type: String,
+      default: null,
+      maxlength: 500,
+    },
+    cancelledAt: {
+      type: Date,
+      default: null,
+    },
+    completedAt: {
+      type: Date,
+      default: null,
+    },
   },
   {
     timestamps: true,
@@ -117,7 +146,12 @@ const orderSchema = new Schema<IOrder>(
 orderSchema.index({ categoryId: 1, governmentId: 1, status: 1, createdAt: -1 });
 orderSchema.index({ customerId: 1, status: 1, createdAt: -1 });
 orderSchema.index({ supplierId: 1, status: 1, updatedAt: -1 });
-orderSchema.index({ customerId: 1, customerReviewed: 1, status: 1, updatedAt: -1 });
+orderSchema.index({
+  customerId: 1,
+  customerReviewed: 1,
+  status: 1,
+  updatedAt: -1,
+});
 
 orderSchema.index(
   { customerId: 1, status: 1 },

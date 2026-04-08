@@ -28,10 +28,11 @@ export const updateOrderPrice = async (req: any, res: Response) => {
   return res.status(200).json(result);
 };
 
-export const deleteOrder = async (req: any, res: Response) => {
-  const result = await OrderService.deleteOrder({
+export const cancelOrder = async (req: any, res: Response) => {
+  const result = await OrderService.cancelOrder({
     orderId: req.params.id,
     customerId: req.user.userId,
+    cancellationReason: req.body.reason,
   });
 
   return res.status(200).json(result);

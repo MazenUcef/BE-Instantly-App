@@ -31,7 +31,7 @@ export const socketEvents = {
 
   ORDER_NEW: "order:new",
   ORDER_UPDATED: "order:updated",
-  ORDER_DELETED: "order:deleted",
+  ORDER_CANCELLED: "order:cancelled",
   ORDER_AVAILABLE_AGAIN: "order:available_again",
   ORDER_ACCEPTED_DIRECT: "order:accepted_direct",
 

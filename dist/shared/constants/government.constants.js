@@ -1,0 +1,10 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.GOVERNMENT_QUEUE_EVENTS = void 0;
+exports.GOVERNMENT_QUEUE_EVENTS = {
+    CREATED: "GOVERNMENT_CREATED",
+    UPDATED: "GOVERNMENT_UPDATED",
+    DEACTIVATED: "GOVERNMENT_DEACTIVATED",
+    ACTIVATED: "GOVERNMENT_ACTIVATED",
+    TOGGLED: "GOVERNMENT_TOGGLED",
+};

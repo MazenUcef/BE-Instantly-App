@@ -17,10 +17,7 @@ export class SessionRepository {
     return SessionModel.create([data], { session }).then((docs) => docs[0]);
   }
 
-  static findById(
-    sessionId: Types.ObjectId | string,
-    session?: ClientSession,
-  ) {
+  static findById(sessionId: Types.ObjectId | string, session?: ClientSession) {
     return SessionModel.findById(sessionId).session(session || null);
   }
 
@@ -29,6 +26,13 @@ export class SessionRepository {
     session?: ClientSession,
   ) {
     return SessionModel.findOne({ orderId }).session(session || null);
+  }
+
+  static findByOfferId(
+    offerId: Types.ObjectId | string,
+    session?: ClientSession,
+  ) {
+    return SessionModel.findOne({ offerId }).session(session || null);
   }
 
   static findActiveByUser(
@@ -51,18 +55,19 @@ export class SessionRepository {
 
   static updateStatus(
     sessionId: Types.ObjectId | string,
-    status: string,
+    currentStatus: string,
+    nextStatus: string,
     extraSet: Record<string, any> = {},
     session?: ClientSession,
   ) {
     return SessionModel.findOneAndUpdate(
       {
         _id: sessionId,
-        status: { $nin: [SESSION_STATUS.COMPLETED, SESSION_STATUS.CANCELLED] },
+        status: currentStatus,
       },
       {
         $set: {
-          status,
+          status: nextStatus,
           ...extraSet,
         },
       },
@@ -77,7 +82,7 @@ export class SessionRepository {
     return SessionModel.findOneAndUpdate(
       {
         _id: sessionId,
-        status: { $nin: [SESSION_STATUS.COMPLETED, SESSION_STATUS.CANCELLED] },
+        status: SESSION_STATUS.WORK_STARTED,
       },
       {
         $set: {
@@ -91,6 +96,7 @@ export class SessionRepository {
 
   static markCancelled(
     sessionId: Types.ObjectId | string,
+    currentStatus: string,
     cancelledBy: "customer" | "supplier",
     cancellationReason?: string,
     session?: ClientSession,
@@ -98,7 +104,7 @@ export class SessionRepository {
     return SessionModel.findOneAndUpdate(
       {
         _id: sessionId,
-        status: { $nin: [SESSION_STATUS.COMPLETED, SESSION_STATUS.CANCELLED] },
+        status: currentStatus,
       },
       {
         $set: {

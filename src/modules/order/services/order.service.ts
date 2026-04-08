@@ -9,10 +9,22 @@ import { AppError } from "../../../shared/middlewares/errorHandler";
 import { OrderRepository } from "../repositories/order.repository";
 import { OrderEventService } from "./order-event.service";
 import { buildSupplierOrderPayload } from "../../../shared/utils/buildSupplierOrderPayload";
-import { ORDER_STATUS } from "../../../shared/constants/order.constants";
-import { getIO, socketEvents, socketRooms } from "../../../shared/config/socket";
-import { SESSION_STATUS } from "../../../shared/constants/session.constants";
+import {
+  ORDER_CANCELLED_BY,
+  ORDER_STATUS,
+} from "../../../shared/constants/order.constants";
+import {
+  getIO,
+  socketEvents,
+  socketRooms,
+} from "../../../shared/config/socket";
+import { SESSION_STATUS, SESSION_CANCELLED_BY } from "../../../shared/constants/session.constants";
 import { OFFER_STATUS } from "../../../shared/constants/offer.constants";
+import { SessionEventService } from "../../session/services/session-event.service";
+import {
+  assertValidOrderTransition,
+  canCustomerCancelOrder,
+} from "../helpers/order-state";
 
 export class OrderService {
   private static async validateOrderDependencies(input: {
@@ -188,20 +200,24 @@ export class OrderService {
     return {
       success: true,
       message: "Price updated successfully",
-      order: payload,
+      data: payload,
     };
   }
 
-  static async deleteOrder(input: { orderId: string; customerId: string }) {
-    const { orderId, customerId } = input;
+  static async cancelOrder(input: {
+    orderId: string;
+    customerId: string;
+    cancellationReason?: string;
+  }) {
+    const { orderId, customerId, cancellationReason } = input;
 
     const dbSession = await mongoose.startSession();
 
-    let deletedOrder: any = null;
+    let cancelledOrder: any = null;
     let activeSession: any = null;
     let acceptedOffer: any = null;
     let pendingOffers: any[] = [];
-    let flowType: "pending_delete" | "cancel_active_session_and_delete" | null =
+    let flowType: "pending_cancel" | "cancel_active_session_and_order" | null =
       null;
 
     try {
@@ -216,16 +232,14 @@ export class OrderService {
           throw new AppError("Not allowed", 403);
         }
 
-        if (
-          ![ORDER_STATUS.PENDING, ORDER_STATUS.IN_PROGRESS].includes(
-            order.status as any,
-          )
-        ) {
+        if (!canCustomerCancelOrder(order.status)) {
           throw new AppError(
-            "Only pending or in-progress orders can be deleted by customer",
+            "Only pending or in-progress orders can be cancelled by customer",
             400,
           );
         }
+
+        assertValidOrderTransition(order.status, ORDER_STATUS.CANCELLED);
 
         pendingOffers = await OfferModel.find({
           orderId: order._id,
@@ -246,77 +260,63 @@ export class OrderService {
           status: OFFER_STATUS.ACCEPTED,
         }).session(dbSession || null);
 
-        if (order.status === ORDER_STATUS.PENDING) {
-          await OfferModel.updateMany(
-            { orderId: order._id, status: OFFER_STATUS.PENDING },
+        await OfferModel.updateMany(
+          { orderId: order._id, status: OFFER_STATUS.PENDING },
+          {
+            $set: {
+              status: OFFER_STATUS.REJECTED,
+              rejectedAt: new Date(),
+            },
+          },
+          { session: dbSession },
+        );
+
+        if (acceptedOffer) {
+          acceptedOffer.status = OFFER_STATUS.REJECTED;
+          acceptedOffer.rejectedAt = new Date();
+          await acceptedOffer.save({ session: dbSession });
+        }
+
+        if (activeSession) {
+          await sessionModel.findOneAndUpdate(
             {
-              $set: {
-                status: OFFER_STATUS.REJECTED,
-                rejectedAt: new Date(),
+              _id: activeSession._id,
+              status: {
+                $nin: [SESSION_STATUS.CANCELLED, SESSION_STATUS.COMPLETED],
               },
             },
-            { session: dbSession },
+            {
+              $set: {
+                status: SESSION_STATUS.CANCELLED,
+                cancelledBy: SESSION_CANCELLED_BY.CUSTOMER,
+                cancellationReason:
+                  cancellationReason || "customer_cancelled_order",
+                cancelledAt: new Date(),
+              },
+            },
+            { session: dbSession, new: true },
           );
+        }
 
-          deletedOrder = await OrderRepository.deletePendingOrderByCustomer(
+        cancelledOrder = await OrderRepository.markCancelled(
+          {
             orderId,
             customerId,
-            dbSession,
-          );
+            cancelledBy: ORDER_CANCELLED_BY.CUSTOMER,
+            cancellationReason:
+              cancellationReason || "customer_cancelled_order",
+          },
+          dbSession,
+        );
 
-          if (!deletedOrder) {
-            throw new AppError("Order not found or already deleted", 409);
-          }
-
-          flowType = "pending_delete";
-          return;
+        if (!cancelledOrder) {
+          throw new AppError("Order not found or already cancelled", 409);
         }
 
-        if (order.status === ORDER_STATUS.IN_PROGRESS) {
-          if (activeSession) {
-            activeSession.status = SESSION_STATUS.CANCELLED;
-            activeSession.cancelledBy = "customer";
-            activeSession.cancellationReason = "customer_deleted_order";
-            activeSession.cancelledAt = new Date();
-            await activeSession.save({ session: dbSession });
-          }
-
-          if (acceptedOffer) {
-            acceptedOffer.status = OFFER_STATUS.REJECTED;
-            acceptedOffer.rejectedAt = new Date();
-            await acceptedOffer.save({ session: dbSession });
-          }
-
-          await OfferModel.updateMany(
-            {
-              orderId: order._id,
-              _id: { $ne: acceptedOffer?._id },
-              status: OFFER_STATUS.PENDING,
-            },
-            {
-              $set: {
-                status: OFFER_STATUS.REJECTED,
-                rejectedAt: new Date(),
-              },
-            },
-            { session: dbSession },
-          );
-
-          deletedOrder = await OrderModel.findOneAndDelete(
-            {
-              _id: orderId,
-              customerId,
-              status: ORDER_STATUS.IN_PROGRESS,
-            },
-            { session: dbSession },
-          );
-
-          if (!deletedOrder) {
-            throw new AppError("Order not found or already deleted", 409);
-          }
-
-          flowType = "cancel_active_session_and_delete";
-        }
+        flowType =
+          order.status === ORDER_STATUS.IN_PROGRESS
+            ? "cancel_active_session_and_order"
+            : "pending_cancel";
       });
     } finally {
       await dbSession.endSession();
@@ -324,9 +324,10 @@ export class OrderService {
 
     const io = getIO();
 
-    await OrderEventService.notifySuppliersOrderDeleted(
+    await OrderEventService.notifySuppliersOrderCancelled(
       pendingOffers,
-      deletedOrder._id.toString(),
+      cancelledOrder._id.toString(),
+      "order_cancelled_by_customer",
     );
 
     if (acceptedOffer?.supplierId) {
@@ -334,8 +335,8 @@ export class OrderService {
         socketEvents.OFFER_REJECTED,
         {
           offerId: acceptedOffer._id.toString(),
-          orderId: deletedOrder._id.toString(),
-          reason: "order_deleted_by_customer",
+          orderId: cancelledOrder._id.toString(),
+          reason: "order_cancelled_by_customer",
           timestamp: new Date(),
         },
       );
@@ -349,59 +350,39 @@ export class OrderService {
         customerId: activeSession.customerId.toString(),
         supplierId: activeSession.supplierId.toString(),
         status: SESSION_STATUS.CANCELLED,
-        cancelledBy: "customer",
-        cancellationReason: "customer_deleted_order",
+        cancelledBy: SESSION_CANCELLED_BY.CUSTOMER,
+        cancellationReason:
+          activeSession.cancellationReason || "customer_cancelled_order",
         cancelledAt: activeSession.cancelledAt,
       };
 
-      io.to(socketRooms.user(activeSession.customerId.toString())).emit(
-        socketEvents.SESSION_CANCELLED,
-        {
-          sessionId: activeSession._id.toString(),
-          session: sessionPayload,
-          cancelledBy: "customer",
-          reason: "customer_deleted_order",
-          timestamp: new Date(),
-        },
-      );
-
-      io.to(socketRooms.user(activeSession.supplierId.toString())).emit(
-        socketEvents.SESSION_CANCELLED,
-        {
-          sessionId: activeSession._id.toString(),
-          session: sessionPayload,
-          cancelledBy: "customer",
-          reason: "customer_deleted_order",
-          timestamp: new Date(),
-        },
-      );
-
-      io.to(socketRooms.chat(activeSession._id.toString())).emit(
-        socketEvents.SESSION_CANCELLED,
-        {
-          sessionId: activeSession._id.toString(),
-          session: sessionPayload,
-          cancelledBy: "customer",
-          reason: "customer_deleted_order",
-          timestamp: new Date(),
-        },
-      );
+      SessionEventService.emitSessionCancelled(sessionPayload, {
+        actorRole: SESSION_CANCELLED_BY.CUSTOMER,
+        actorId: customerId,
+        reason: cancellationReason || "customer_cancelled_order",
+      });
     }
 
-    await OrderEventService.emitOrderDeleted(
-      deletedOrder._id.toString(),
-      deletedOrder.categoryId.toString(),
-      deletedOrder.governmentId.toString(),
+    await OrderEventService.emitOrderCancelled(
+      cancelledOrder._id.toString(),
+      cancelledOrder.categoryId.toString(),
+      cancelledOrder.governmentId.toString(),
+      {
+        actorId: customerId,
+        actorRole: "customer",
+        reason: cancelledOrder.cancellationReason || "customer_cancelled_order",
+      },
     );
 
     return {
       success: true,
       message:
-        flowType === "cancel_active_session_and_delete"
-          ? "Order deleted and active session cancelled successfully"
-          : "Order deleted and offers rejected",
+        flowType === "cancel_active_session_and_order"
+          ? "Order cancelled and active session cancelled successfully"
+          : "Order cancelled successfully",
       data: {
-        orderId: deletedOrder._id.toString(),
+        orderId: cancelledOrder._id.toString(),
+        orderStatus: cancelledOrder.status,
         sessionId: activeSession?._id?.toString() || null,
       },
     };
@@ -552,11 +533,14 @@ export class OrderService {
 
     return {
       success: true,
-      count: orders.length,
-      total,
-      page,
-      limit,
-      orders,
+      data: orders,
+      meta: {
+        page,
+        limit,
+        total,
+        count: orders.length,
+        hasNextPage: page * limit < total,
+      },
     };
   }
 

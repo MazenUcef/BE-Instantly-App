@@ -1,0 +1,16 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+const express_1 = require("express");
+const auth_1 = require("../../../shared/middlewares/auth");
+const session_controller_1 = require("../controllers/session.controller");
+const session_validation_1 = require("../validators/session.validation");
+const router = (0, express_1.Router)();
+router.post("/", auth_1.authenticate, session_validation_1.validateCreateSession, session_controller_1.createSession);
+router.patch("/:id/status", auth_1.authenticate, session_validation_1.validateUpdateSessionStatus, session_controller_1.updateSessionStatus);
+router.patch("/:id/complete", auth_1.authenticate, session_validation_1.validateSessionIdParam, session_controller_1.completeSession);
+router.patch("/:sessionId/confirm-payment", auth_1.authenticate, session_validation_1.validateSessionPaymentParam, session_controller_1.confirmSessionPayment);
+router.get("/active/:userId", auth_1.authenticate, session_validation_1.validateUserIdParam, session_controller_1.getActiveSessionForUser);
+router.get("/by-order/:orderId", auth_1.authenticate, session_validation_1.validateOrderIdParam, session_controller_1.getSessionByOrder);
+router.get("/resume/:userId", auth_1.authenticate, session_validation_1.validateUserIdParam, session_controller_1.getResumeSessionForUser);
+router.get("/:id", auth_1.authenticate, session_validation_1.validateSessionIdParam, session_controller_1.getSessionById);
+exports.default = router;

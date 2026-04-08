@@ -6,6 +6,8 @@ import {
 import { SESSION_NOTIFICATION_TYPES } from "../../../shared/constants/session.constants";
 import { publishNotification } from "../../notification/notification.publisher";
 
+type ActorRole = "customer" | "supplier" | "system" | "admin";
+
 export class SessionEventService {
   static emitSessionToParticipants(
     eventName: string,
@@ -27,6 +29,46 @@ export class SessionEventService {
     );
     io.to(socketRooms.user(session.supplierId.toString())).emit(
       eventName,
+      payload,
+    );
+  }
+
+  /**
+   * Emit SESSION_CANCELLED with a standard envelope including meta fields.
+   * Use this instead of emitSessionToParticipants for cancellation events.
+   */
+  static emitSessionCancelled(
+    session: any,
+    meta: {
+      actorRole: ActorRole;
+      actorId?: string;
+      reason?: string | null;
+    },
+  ) {
+    const io = getIO();
+
+    const payload = {
+      type: "session.cancelled",
+      sessionId: session._id.toString(),
+      session,
+      meta: {
+        actorId: meta.actorId || null,
+        actorRole: meta.actorRole,
+        reason: meta.reason || null,
+        changedAt: new Date().toISOString(),
+      },
+    };
+
+    io.to(socketRooms.chat(session._id.toString())).emit(
+      socketEvents.SESSION_CANCELLED,
+      payload,
+    );
+    io.to(socketRooms.user(session.customerId.toString())).emit(
+      socketEvents.SESSION_CANCELLED,
+      payload,
+    );
+    io.to(socketRooms.user(session.supplierId.toString())).emit(
+      socketEvents.SESSION_CANCELLED,
       payload,
     );
   }

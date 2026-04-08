@@ -7,9 +7,14 @@ import { BundleBookingRepository } from "../repositories/bundleBooking.repositor
 import { overlapsTimeRange } from "../../../shared/utils/calendar";
 import {
   BUNDLE_BOOKING_ACTIVE_SLOT_STATUSES,
+  BUNDLE_BOOKING_CANCELLED_BY,
   BUNDLE_BOOKING_STATUS,
 } from "../../../shared/constants/bundleBooking.constants";
 import { BundleBookingEventService } from "./bundleBooking-events.service";
+import {
+  assertValidBookingTransition,
+  canCancelBooking,
+} from "../helpers/bundleBooking-state";
 
 const buildBundleBookingPayload = async (bookingId: string) => {
   const booking = await BundleBookingModel.findById(bookingId).lean();
@@ -174,7 +179,7 @@ export class BundleBookingService {
     return {
       success: true,
       message: "Bundle booking created successfully",
-      booking: payload,
+      data: payload,
     };
   }
 
@@ -191,10 +196,13 @@ export class BundleBookingService {
       bookings.map((item) => buildBundleBookingPayload(item._id.toString())),
     );
 
+    const validBookings = enriched.filter(Boolean);
     return {
       success: true,
-      count: enriched.filter(Boolean).length,
-      bookings: enriched.filter(Boolean),
+      data: validBookings,
+      meta: {
+        count: validBookings.length,
+      },
     };
   }
 
@@ -211,10 +219,13 @@ export class BundleBookingService {
       bookings.map((item) => buildBundleBookingPayload(item._id.toString())),
     );
 
+    const validBookings = enriched.filter(Boolean);
     return {
       success: true,
-      count: enriched.filter(Boolean).length,
-      bookings: enriched.filter(Boolean),
+      data: validBookings,
+      meta: {
+        count: validBookings.length,
+      },
     };
   }
 
@@ -232,7 +243,7 @@ export class BundleBookingService {
 
     return {
       success: true,
-      booking,
+      data: booking,
     };
   }
 
@@ -287,7 +298,7 @@ export class BundleBookingService {
     return {
       success: true,
       message: "Booking accepted successfully",
-      booking: payload,
+      data: payload,
     };
   }
 
@@ -322,7 +333,7 @@ export class BundleBookingService {
     return {
       success: true,
       message: "Booking rejected successfully",
-      booking: payload,
+      data: payload,
     };
   }
 
@@ -352,7 +363,7 @@ export class BundleBookingService {
     return {
       success: true,
       message: "Booking started successfully",
-      booking: payload,
+      data: payload,
     };
   }
 
@@ -383,7 +394,7 @@ export class BundleBookingService {
     return {
       success: true,
       message: "Booking marked as done",
-      booking: payload,
+      data: payload,
     };
   }
 
@@ -418,7 +429,7 @@ export class BundleBookingService {
     return {
       success: true,
       message: "Payment confirmed and booking completed",
-      booking: payload,
+      data: payload,
     };
   }
 
@@ -431,17 +442,15 @@ export class BundleBookingService {
       input.userId,
     );
 
-    if (
-      [
-        BUNDLE_BOOKING_STATUS.COMPLETED,
-        BUNDLE_BOOKING_STATUS.CANCELLED,
-        BUNDLE_BOOKING_STATUS.REJECTED,
-      ].includes(booking.status as any)
-    ) {
+    assertValidBookingTransition(booking.status, BUNDLE_BOOKING_STATUS.CANCELLED);
+
+    if (!canCancelBooking(booking.status)) {
       throw new AppError("Booking cannot be cancelled now", 400);
     }
 
-    const cancelledBy = isCustomer ? "customer" : "supplier";
+    const cancelledBy = isCustomer
+      ? BUNDLE_BOOKING_CANCELLED_BY.CUSTOMER
+      : BUNDLE_BOOKING_CANCELLED_BY.SUPPLIER;
 
     const updatedBooking = await BundleBookingRepository.updateBooking(
       String(booking._id),
@@ -459,7 +468,7 @@ export class BundleBookingService {
     return {
       success: true,
       message: "Booking cancelled successfully",
-      booking: payload,
+      data: payload,
     };
   }
 }

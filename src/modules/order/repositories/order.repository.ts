@@ -68,18 +68,76 @@ export class OrderRepository {
     );
   }
 
-  static deletePendingOrderByCustomer(
-    orderId: Types.ObjectId | string,
-    customerId: Types.ObjectId | string,
+  static markCancelled(
+    input: {
+      orderId: Types.ObjectId | string;
+      customerId?: Types.ObjectId | string;
+      cancelledBy: string;
+      cancellationReason?: string | null;
+    },
     session?: ClientSession,
   ) {
-    return OrderModel.findOneAndDelete(
+    const filter: any = {
+      _id: input.orderId,
+      status: { $in: [ORDER_STATUS.PENDING, ORDER_STATUS.IN_PROGRESS] },
+    };
+
+    if (input.customerId) {
+      filter.customerId = input.customerId;
+    }
+
+    return OrderModel.findOneAndUpdate(
+      filter,
+      {
+        $set: {
+          status: ORDER_STATUS.CANCELLED,
+          cancelledBy: input.cancelledBy,
+          cancellationReason: input.cancellationReason || null,
+          cancelledAt: new Date(),
+        },
+      },
+      { new: true, session },
+    );
+  }
+
+  static markInProgress(
+    orderId: Types.ObjectId | string,
+    supplierId: Types.ObjectId | string,
+    finalPrice: number,
+    session?: ClientSession,
+  ) {
+    return OrderModel.findOneAndUpdate(
       {
         _id: orderId,
-        customerId,
         status: ORDER_STATUS.PENDING,
       },
-      { session },
+      {
+        $set: {
+          status: ORDER_STATUS.IN_PROGRESS,
+          supplierId,
+          finalPrice,
+        },
+      },
+      { new: true, session },
+    );
+  }
+
+  static markCompleted(
+    orderId: Types.ObjectId | string,
+    session?: ClientSession,
+  ) {
+    return OrderModel.findOneAndUpdate(
+      {
+        _id: orderId,
+        status: ORDER_STATUS.IN_PROGRESS,
+      },
+      {
+        $set: {
+          status: ORDER_STATUS.COMPLETED,
+          completedAt: new Date(),
+        },
+      },
+      { new: true, session },
     );
   }
 
@@ -98,6 +156,26 @@ export class OrderRepository {
 
   static countCustomerOrders(customerId: Types.ObjectId | string) {
     return OrderModel.countDocuments({ customerId });
+  }
+
+  static resetToPending(
+    orderId: Types.ObjectId | string,
+    session?: ClientSession,
+  ) {
+    return OrderModel.findOneAndUpdate(
+      {
+        _id: orderId,
+        status: ORDER_STATUS.IN_PROGRESS,
+      },
+      {
+        $set: {
+          status: ORDER_STATUS.PENDING,
+          supplierId: null,
+          finalPrice: null,
+        },
+      },
+      { new: true, session },
+    );
   }
 
   static findPendingOrdersForSupplierFeed(input: {

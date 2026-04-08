@@ -1,5 +1,11 @@
 import mongoose, { Schema, Document, Types } from "mongoose";
-import { SESSION_STATUS, SessionStatus } from "../../../shared/constants/session.constants";
+import {
+  SESSION_STATUS,
+  SESSION_ACTIVE_STATUSES,
+  SessionStatus,
+  SESSION_CANCELLED_BY,
+  SessionCancelledBy,
+} from "../../../shared/constants/session.constants";
 
 export interface IJobSession extends Document {
   orderId: Types.ObjectId;
@@ -9,7 +15,7 @@ export interface IJobSession extends Document {
   paymentConfirmed: boolean;
   paymentConfirmedAt?: Date | null;
   status: SessionStatus;
-  cancelledBy?: "customer" | "supplier" | null;
+  cancelledBy?: SessionCancelledBy | null;
   cancellationReason?: string | null;
 
   startedAt?: Date | null;
@@ -66,7 +72,7 @@ const JobSessionSchema = new Schema<IJobSession>(
     },
     cancelledBy: {
       type: String,
-      enum: ["customer", "supplier", null],
+      enum: Object.values(SESSION_CANCELLED_BY),
       default: null,
     },
     cancellationReason: {
@@ -112,20 +118,12 @@ JobSessionSchema.index({ customerId: 1, status: 1, updatedAt: -1 });
 JobSessionSchema.index({ supplierId: 1, status: 1, updatedAt: -1 });
 JobSessionSchema.index({ status: 1, updatedAt: -1 });
 
-// Optional protection: only one active session per customer
 JobSessionSchema.index(
   { customerId: 1, status: 1 },
   {
     unique: true,
     partialFilterExpression: {
-      status: {
-        $in: [
-          SESSION_STATUS.STARTED,
-          SESSION_STATUS.ON_THE_WAY,
-          SESSION_STATUS.ARRIVED,
-          SESSION_STATUS.WORK_STARTED,
-        ],
-      },
+      status: { $in: [...SESSION_ACTIVE_STATUSES] },
     },
     name: "uniq_customer_single_active_session",
   },
@@ -136,14 +134,7 @@ JobSessionSchema.index(
   {
     unique: true,
     partialFilterExpression: {
-      status: {
-        $in: [
-          SESSION_STATUS.STARTED,
-          SESSION_STATUS.ON_THE_WAY,
-          SESSION_STATUS.ARRIVED,
-          SESSION_STATUS.WORK_STARTED,
-        ],
-      },
+      status: { $in: [...SESSION_ACTIVE_STATUSES] },
     },
     name: "uniq_supplier_single_active_session",
   },

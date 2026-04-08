@@ -1,0 +1,15 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+const express_1 = require("express");
+const auth_1 = require("../../../shared/middlewares/auth");
+const call_controller_1 = require("../controllers/call.controller");
+const call_validation_1 = require("../validators/call.validation");
+const router = (0, express_1.Router)();
+router.get("/ice-config", auth_1.authenticate, call_controller_1.getIceConfig);
+router.get("/session/:sessionId/history", auth_1.authenticate, call_validation_1.validateSessionIdParam, call_controller_1.getSessionCallHistory);
+router.post("/start", auth_1.authenticate, call_validation_1.validateStartCall, call_controller_1.startCall);
+router.post("/:id/accept", auth_1.authenticate, call_validation_1.validateCallIdParam, call_controller_1.acceptCall);
+router.post("/:id/decline", auth_1.authenticate, call_validation_1.validateCallIdParam, call_controller_1.declineCall);
+router.post("/:id/end", auth_1.authenticate, call_validation_1.validateCallIdParam, call_controller_1.endCall);
+router.post("/:id/missed", auth_1.authenticate, call_validation_1.validateCallIdParam, call_controller_1.markMissedCall);
+exports.default = router;

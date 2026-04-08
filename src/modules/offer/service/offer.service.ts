@@ -13,7 +13,11 @@ import {
 } from "../../../shared/config/socket";
 import { buildSupplierOrderPayload } from "../../../shared/utils/buildSupplierOrderPayload";
 import { OfferRepository } from "../repository/offer.repository";
-import { SESSION_STATUS } from "../../../shared/constants/session.constants";
+import { OrderRepository } from "../../order/repositories/order.repository";
+import { OrderEventService } from "../../order/services/order-event.service";
+import { SessionRepository } from "../../session/repositories/session.repository";
+import { SessionEventService } from "../../session/services/session-event.service";
+import { SESSION_STATUS, SESSION_CANCELLED_BY } from "../../../shared/constants/session.constants";
 
 export class OfferService {
   private static async ensureSupplierCanCreateOffer(
@@ -282,25 +286,28 @@ export class OfferService {
           dbSession,
         );
 
-        order.status = ORDER_STATUS.IN_PROGRESS;
-        order.supplierId = offer.supplierId;
-        order.finalPrice = offer.amount;
-        await order.save({ session: dbSession });
+        const updatedOrder = await OrderRepository.markInProgress(
+          order._id,
+          offer.supplierId,
+          offer.amount,
+          dbSession,
+        );
 
-        sessionDoc = await sessionModel
-          .create(
-            [
-              {
-                orderId: order._id,
-                offerId: offer._id,
-                customerId: order.customerId,
-                supplierId: offer.supplierId,
-                status: "started",
-              },
-            ],
-            { session: dbSession },
-          )
-          .then((docs) => docs[0]);
+        if (!updatedOrder) {
+          throw new AppError("Order state changed concurrently", 409);
+        }
+
+        sessionDoc = await SessionRepository.createSession(
+          {
+            orderId: order._id,
+            offerId: offer._id,
+            customerId: order.customerId,
+            supplierId: offer.supplierId,
+            status: SESSION_STATUS.STARTED,
+            startedAt: new Date(),
+          },
+          dbSession,
+        );
       });
     } catch (error: any) {
       if (error?.code === 11000) {
@@ -571,23 +578,28 @@ export class OfferService {
         }
 
         // accepted offer flow
-        relatedSession = await sessionModel
+        const activeRelatedSession = await sessionModel
           .findOne({
             offerId: existingOffer._id,
+            status: {
+              $nin: [SESSION_STATUS.COMPLETED, SESSION_STATUS.CANCELLED],
+            },
           })
           .session(dbSession || null);
 
-        if (
-          relatedSession &&
-          ![SESSION_STATUS.COMPLETED, SESSION_STATUS.CANCELLED].includes(
-            relatedSession.status,
-          )
-        ) {
+        if (activeRelatedSession) {
+          const cancelled = await SessionRepository.markCancelled(
+            activeRelatedSession._id,
+            activeRelatedSession.status,
+            SESSION_CANCELLED_BY.SUPPLIER,
+            "supplier_deleted_accepted_offer",
+            dbSession,
+          );
+          // Capture the updated session for post-transaction socket emissions
+          relatedSession = cancelled || activeRelatedSession;
           relatedSession.status = SESSION_STATUS.CANCELLED;
-          relatedSession.cancelledBy = "supplier";
+          relatedSession.cancelledBy = SESSION_CANCELLED_BY.SUPPLIER;
           relatedSession.cancellationReason = "supplier_deleted_accepted_offer";
-          relatedSession.cancelledAt = new Date();
-          await relatedSession.save({ session: dbSession });
         }
 
         deletedOffer = await OfferRepository.withdrawAcceptedOfferBySupplier(
@@ -600,10 +612,10 @@ export class OfferService {
           throw new AppError("Accepted offer could not be withdrawn", 409);
         }
 
-        relatedOrder.status = ORDER_STATUS.PENDING;
-        relatedOrder.supplierId = null;
-        relatedOrder.finalPrice = null;
-        await relatedOrder.save({ session: dbSession });
+        const resetOrder = await OrderRepository.resetToPending(relatedOrder._id, dbSession);
+        if (!resetOrder) {
+          throw new AppError("Order state changed concurrently", 409);
+        }
 
         flowType = "accepted_cancel";
       });
@@ -658,52 +670,12 @@ export class OfferService {
       };
     }
 
-    const orderPayload = await buildSupplierOrderPayload(
-      relatedOrder._id.toString(),
-    );
-
     if (relatedSession) {
-      const sessionPayload = {
-        _id: relatedSession._id.toString(),
-        orderId: relatedSession.orderId.toString(),
-        offerId: relatedSession.offerId.toString(),
-        customerId: relatedSession.customerId.toString(),
-        supplierId: relatedSession.supplierId.toString(),
-        status: SESSION_STATUS.CANCELLED,
-        cancelledBy: "supplier",
-        cancellationReason: "supplier_deleted_accepted_offer",
-        cancelledAt: relatedSession.cancelledAt,
-      };
-
-      io.to(socketRooms.user(relatedOrder.customerId.toString())).emit(
-        socketEvents.SESSION_CANCELLED,
-        {
-          sessionId: relatedSession._id.toString(),
-          session: sessionPayload,
-          cancelledBy: "supplier",
-          reason: "supplier_deleted_accepted_offer",
-          timestamp: new Date(),
-        },
-      );
-
-      io.to(socketRooms.user(supplierId)).emit(socketEvents.SESSION_CANCELLED, {
-        sessionId: relatedSession._id.toString(),
-        session: sessionPayload,
-        cancelledBy: "supplier",
+      SessionEventService.emitSessionCancelled(relatedSession, {
+        actorRole: SESSION_CANCELLED_BY.SUPPLIER,
+        actorId: supplierId,
         reason: "supplier_deleted_accepted_offer",
-        timestamp: new Date(),
       });
-
-      io.to(socketRooms.chat(relatedSession._id.toString())).emit(
-        socketEvents.SESSION_CANCELLED,
-        {
-          sessionId: relatedSession._id.toString(),
-          session: sessionPayload,
-          cancelledBy: "supplier",
-          reason: "supplier_deleted_accepted_offer",
-          timestamp: new Date(),
-        },
-      );
     }
 
     io.to(socketRooms.user(relatedOrder.customerId.toString())).emit(
@@ -728,21 +700,13 @@ export class OfferService {
       },
     );
 
-    if (orderPayload) {
-      io.to(
-        socketRooms.supplierOrders(
-          relatedOrder.categoryId.toString(),
-          relatedOrder.governmentId.toString(),
-        ),
-      ).emit(socketEvents.ORDER_AVAILABLE_AGAIN, {
-        orderId: relatedOrder._id.toString(),
-        order: orderPayload,
-        reason: "supplier_deleted_accepted_offer",
-        timestamp: new Date(),
-      });
-    }
-
     await Promise.all([
+      OrderEventService.emitOrderAvailableAgain(
+        relatedOrder._id.toString(),
+        relatedOrder.categoryId.toString(),
+        relatedOrder.governmentId.toString(),
+        "supplier_deleted_accepted_offer",
+      ),
       OfferEventService.emitSupplierPendingCountUpdate(supplierId),
       OfferEventService.emitSupplierPendingOffersList(supplierId),
     ]);
@@ -794,7 +758,7 @@ export class OfferService {
 
     return {
       success: true,
-      offers: enrichedOffers,
+      data: enrichedOffers,
     };
   }
 
@@ -856,25 +820,28 @@ export class OfferService {
           dbSession,
         );
 
-        order.status = ORDER_STATUS.IN_PROGRESS;
-        order.supplierId = supplierId;
-        order.finalPrice = order.requestedPrice;
-        await order.save({ session: dbSession });
+        const updatedOrder = await OrderRepository.markInProgress(
+          order._id,
+          supplierId,
+          order.requestedPrice,
+          dbSession,
+        );
 
-        sessionDoc = await sessionModel
-          .create(
-            [
-              {
-                orderId: order._id,
-                offerId: offer._id,
-                customerId: order.customerId,
-                supplierId,
-                status: "started",
-              },
-            ],
-            { session: dbSession },
-          )
-          .then((docs) => docs[0]);
+        if (!updatedOrder) {
+          throw new AppError("Order state changed concurrently", 409);
+        }
+
+        sessionDoc = await SessionRepository.createSession(
+          {
+            orderId: order._id,
+            offerId: offer._id,
+            customerId: order.customerId,
+            supplierId,
+            status: SESSION_STATUS.STARTED,
+            startedAt: new Date(),
+          },
+          dbSession,
+        );
       });
     } catch (error: any) {
       if (error?.code === 11000) {
@@ -1003,11 +970,14 @@ export class OfferService {
 
     return {
       success: true,
-      count: enrichedOffers.length,
-      total,
-      page,
-      limit,
-      offers: enrichedOffers,
+      data: enrichedOffers,
+      meta: {
+        page,
+        limit,
+        total,
+        count: enrichedOffers.length,
+        hasNextPage: page * limit < total,
+      },
     };
   }
 
@@ -1041,11 +1011,14 @@ export class OfferService {
 
     return {
       success: true,
-      count: enrichedOffers.length,
-      total,
-      page,
-      limit,
-      offers: enrichedOffers,
+      data: enrichedOffers,
+      meta: {
+        page,
+        limit,
+        total,
+        count: enrichedOffers.length,
+        hasNextPage: page * limit < total,
+      },
       stats: {
         totalPending: total,
         hasActiveJob: !!activeAcceptedOffer,

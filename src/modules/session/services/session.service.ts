@@ -5,13 +5,19 @@ import UserModel from "../../auth/models/User.model";
 import { AppError } from "../../../shared/middlewares/errorHandler";
 import { SessionRepository } from "../repositories/session.repository";
 import { SessionEventService } from "./session-event.service";
-import { buildSupplierOrderPayload } from "../../../shared/utils/buildSupplierOrderPayload";
+import { OrderRepository } from "../../order/repositories/order.repository";
+import { OrderEventService } from "../../order/services/order-event.service";
+import { socketEvents } from "../../../shared/config/socket";
 import {
-  getIO,
-  socketEvents,
-  socketRooms,
-} from "../../../shared/config/socket";
-import { SESSION_STATUS } from "../../../shared/constants/session.constants";
+  SESSION_STATUS,
+  SESSION_CANCELLED_BY,
+  SESSION_RESUME_ACTION,
+  SessionStatus,
+} from "../../../shared/constants/session.constants";
+import { ORDER_STATUS, ORDER_CANCELLED_BY } from "../../../shared/constants/order.constants";
+import { OFFER_STATUS } from "../../../shared/constants/offer.constants";
+import { assertValidSessionTransition, canCancelSession, canCompleteSession, canConfirmSessionPayment } from "../helper/session-state";
+
 
 const SESSION_STATUS_TO_TIMESTAMP_FIELD: Record<string, string> = {
   [SESSION_STATUS.ON_THE_WAY]: "onTheWayAt",
@@ -64,25 +70,67 @@ export class SessionService {
     }
   }
 
-  private static ensureValidProgressTransition(
-    currentStatus: string,
-    nextStatus: string,
+  private static async validateSessionCreationInput(
+    input: {
+      orderId: string;
+      offerId: string;
+      customerId: string;
+      supplierId: string;
+    },
+    dbSession: any,
   ) {
-    const transitions: Record<string, string[]> = {
-      [SESSION_STATUS.STARTED]: [SESSION_STATUS.ON_THE_WAY],
-      [SESSION_STATUS.ON_THE_WAY]: [SESSION_STATUS.ARRIVED],
-      [SESSION_STATUS.ARRIVED]: [SESSION_STATUS.WORK_STARTED],
-      [SESSION_STATUS.WORK_STARTED]: [],
-    };
+    const [order, offer] = await Promise.all([
+      Order.findById(input.orderId).session(dbSession),
+      Offer.findById(input.offerId).session(dbSession),
+    ]);
 
-    const allowedNext = transitions[currentStatus] || [];
-
-    if (!allowedNext.includes(nextStatus)) {
-      throw new AppError(
-        `Invalid session status transition from "${currentStatus}" to "${nextStatus}"`,
-        400,
-      );
+    if (!order) {
+      throw new AppError("Order not found", 404);
     }
+
+    if (!offer) {
+      throw new AppError("Offer not found", 404);
+    }
+
+    if (String(order._id) !== String(offer.orderId)) {
+      throw new AppError("Offer does not belong to this order", 400);
+    }
+
+    if (String(order.customerId) !== String(input.customerId)) {
+      throw new AppError("Customer mismatch for order", 400);
+    }
+
+    if (String(offer.supplierId) !== String(input.supplierId)) {
+      throw new AppError("Supplier mismatch for offer", 400);
+    }
+
+    if (order.status !== ORDER_STATUS.IN_PROGRESS) {
+      throw new AppError("Order must be in progress before creating session", 409);
+    }
+
+    if (offer.status !== OFFER_STATUS.ACCEPTED) {
+      throw new AppError("Offer must be accepted before creating session", 409);
+    }
+
+    const existingOrderSession = await SessionRepository.findByOrderId(
+      input.orderId,
+      dbSession,
+    );
+
+    if (existingOrderSession) {
+      throw new AppError("Session already exists for this order", 409);
+    }
+
+    const existingOfferSession = await SessionRepository.findByOfferId(
+      input.offerId,
+      dbSession,
+    );
+
+    if (existingOfferSession) {
+      throw new AppError("Session already exists for this offer", 409);
+    }
+
+    return { order, offer };
   }
 
   static async createSession(input: {
@@ -98,6 +146,11 @@ export class SessionService {
 
     try {
       await dbSession.withTransaction(async () => {
+        await this.validateSessionCreationInput(
+          { orderId, offerId, customerId, supplierId },
+          dbSession,
+        );
+
         const existingCustomerSession = await SessionRepository.findActiveByUser(
           customerId,
           dbSession,
@@ -134,6 +187,11 @@ export class SessionService {
           dbSession,
         );
       });
+    } catch (error: any) {
+      if (error?.code === 11000) {
+        throw new AppError("Session already exists or active session conflict occurred", 409);
+      }
+      throw error;
     } finally {
       await dbSession.endSession();
     }
@@ -164,7 +222,7 @@ export class SessionService {
 
     return {
       success: true,
-      data: populatedSession,
+      data: { session: populatedSession },
     };
   }
 
@@ -190,14 +248,14 @@ export class SessionService {
     return {
       success: true,
       active: true,
-      session: populatedSession,
+      data: { session: populatedSession },
     };
   }
 
   static async updateSessionStatus(input: {
     sessionId: string;
     actorUserId: string;
-    nextStatus: string;
+    nextStatus: SessionStatus;
     reason?: string;
   }) {
     const { sessionId, actorUserId, nextStatus, reason } = input;
@@ -218,13 +276,18 @@ export class SessionService {
         this.ensureParticipant(session, actorUserId);
 
         if (nextStatus === SESSION_STATUS.CANCELLED) {
-          const isCustomer = session.customerId.toString() === actorUserId;
-          const isSupplier = session.supplierId.toString() === actorUserId;
+          if (!canCancelSession(session.status)) {
+            throw new AppError("Session cannot be cancelled now", 400);
+          }
 
-          cancelledBy = isCustomer ? "customer" : "supplier";
+          const isCustomer = session.customerId.toString() === actorUserId;
+          cancelledBy = isCustomer
+            ? SESSION_CANCELLED_BY.CUSTOMER
+            : SESSION_CANCELLED_BY.SUPPLIER;
 
           updatedSession = await SessionRepository.markCancelled(
             sessionId,
+            session.status,
             cancelledBy,
             reason,
             dbSession,
@@ -234,9 +297,7 @@ export class SessionService {
             throw new AppError("Failed to cancel session", 409);
           }
 
-          relatedOrder = await Order.findById(session.orderId).session(
-            dbSession || null,
-          );
+          relatedOrder = await Order.findById(session.orderId).session(dbSession);
 
           if (!relatedOrder) {
             throw new AppError("Associated order not found", 404);
@@ -244,41 +305,54 @@ export class SessionService {
 
           await Offer.findByIdAndUpdate(
             session.offerId,
-            { status: "rejected", rejectedAt: new Date() },
+            {
+              $set: {
+                status: OFFER_STATUS.REJECTED,
+                rejectedAt: new Date(),
+              },
+            },
             { session: dbSession, new: true },
           );
 
           if (isCustomer) {
             await Offer.updateMany(
-              { orderId: relatedOrder._id, status: "pending" },
-              { $set: { status: "rejected", rejectedAt: new Date() } },
+              {
+                orderId: relatedOrder._id,
+                status: OFFER_STATUS.PENDING,
+              },
+              {
+                $set: {
+                  status: OFFER_STATUS.REJECTED,
+                  rejectedAt: new Date(),
+                },
+              },
               { session: dbSession },
             );
 
-            await Order.findByIdAndDelete(relatedOrder._id, {
-              session: dbSession,
-            });
-          }
-
-          if (isSupplier) {
-            await Order.findByIdAndUpdate(
-              relatedOrder._id,
-              { status: "pending", supplierId: null },
-              { session: dbSession, new: true },
+            await OrderRepository.markCancelled(
+              {
+                orderId: relatedOrder._id,
+                cancelledBy: ORDER_CANCELLED_BY.CUSTOMER,
+                cancellationReason: reason || "customer_cancelled_session",
+              },
+              dbSession,
             );
+          } else {
+            await OrderRepository.resetToPending(relatedOrder._id, dbSession);
           }
 
           return;
         }
 
         this.ensureSupplier(session, actorUserId);
-        this.ensureValidProgressTransition(session.status, nextStatus);
+        assertValidSessionTransition(session.status, nextStatus);
 
         const timestampField = SESSION_STATUS_TO_TIMESTAMP_FIELD[nextStatus];
         const extraSet = timestampField ? { [timestampField]: new Date() } : {};
 
         updatedSession = await SessionRepository.updateStatus(
           sessionId,
+          session.status,
           nextStatus,
           extraSet,
           dbSession,
@@ -293,7 +367,6 @@ export class SessionService {
     }
 
     const populatedSession = await populateSessionData(updatedSession);
-    const io = getIO();
 
     if (nextStatus !== SESSION_STATUS.CANCELLED) {
       SessionEventService.emitSessionToParticipants(
@@ -310,48 +383,38 @@ export class SessionService {
       return {
         success: true,
         message: `Session status updated to "${nextStatus}"`,
-        session: populatedSession,
+        data: { session: populatedSession },
       };
     }
 
-    if (cancelledBy === "customer" && relatedOrder) {
-      io.to(
-        socketRooms.supplierOrders(
-          relatedOrder.categoryId.toString(),
-          relatedOrder.governmentId.toString(),
-        ),
-      ).emit(socketEvents.ORDER_DELETED, {
-        orderId: relatedOrder._id.toString(),
-        reason: "customer_cancelled_session",
-        timestamp: new Date(),
-      });
-    }
-
-    if (cancelledBy === "supplier" && relatedOrder) {
-      const supplierOrderPayload = await buildSupplierOrderPayload(
+    // Emit cancellation events using standard envelopes
+    if (cancelledBy === SESSION_CANCELLED_BY.CUSTOMER && relatedOrder) {
+      await OrderEventService.emitOrderCancelled(
         relatedOrder._id.toString(),
+        relatedOrder.categoryId.toString(),
+        relatedOrder.governmentId.toString(),
+        {
+          actorId: actorUserId,
+          actorRole: "customer",
+          reason: reason || "customer_cancelled_session",
+        },
       );
-
-      if (supplierOrderPayload) {
-        io.to(
-          socketRooms.supplierOrders(
-            relatedOrder.categoryId.toString(),
-            relatedOrder.governmentId.toString(),
-          ),
-        ).emit(socketEvents.ORDER_AVAILABLE_AGAIN, {
-          orderId: relatedOrder._id.toString(),
-          order: supplierOrderPayload,
-          reason: "supplier_cancelled_session",
-          timestamp: new Date(),
-        });
-      }
     }
 
-    SessionEventService.emitSessionToParticipants(
-      socketEvents.SESSION_CANCELLED,
-      populatedSession,
-      { cancelledBy },
-    );
+    if (cancelledBy === SESSION_CANCELLED_BY.SUPPLIER && relatedOrder) {
+      await OrderEventService.emitOrderAvailableAgain(
+        relatedOrder._id.toString(),
+        relatedOrder.categoryId.toString(),
+        relatedOrder.governmentId.toString(),
+        reason || "supplier_cancelled_session",
+      );
+    }
+
+    SessionEventService.emitSessionCancelled(populatedSession, {
+      actorRole: cancelledBy!,
+      actorId: actorUserId,
+      reason,
+    });
 
     await SessionEventService.notifySessionCancelled(
       populatedSession,
@@ -361,12 +424,17 @@ export class SessionService {
     return {
       success: true,
       message:
-        cancelledBy === "customer"
-          ? "Session cancelled and order deleted"
+        cancelledBy === SESSION_CANCELLED_BY.CUSTOMER
+          ? "Session cancelled and order cancelled"
           : "Session cancelled and order returned to pending",
-      session: populatedSession,
-      orderStatus: cancelledBy === "supplier" ? "pending" : "deleted",
-      cancelledBy,
+      data: {
+        session: populatedSession,
+        orderStatus:
+          cancelledBy === SESSION_CANCELLED_BY.SUPPLIER
+            ? ORDER_STATUS.PENDING
+            : ORDER_STATUS.CANCELLED,
+        cancelledBy,
+      },
     };
   }
 
@@ -389,7 +457,7 @@ export class SessionService {
 
         this.ensureSupplier(session, actorUserId);
 
-        if (session.status !== SESSION_STATUS.WORK_STARTED) {
+        if (!canCompleteSession(session.status)) {
           throw new AppError(
             "Session can only be completed after work has started",
             400,
@@ -408,12 +476,22 @@ export class SessionService {
         await Promise.all([
           Order.findByIdAndUpdate(
             session.orderId,
-            { status: "completed" },
+            {
+              $set: {
+                status: ORDER_STATUS.COMPLETED,
+                completedAt: new Date(),
+              },
+            },
             { new: true, session: dbSession },
           ),
           Offer.findByIdAndUpdate(
             session.offerId,
-            { status: "completed", completedAt: new Date() },
+            {
+              $set: {
+                status: OFFER_STATUS.COMPLETED,
+                completedAt: new Date(),
+              },
+            },
             { new: true, session: dbSession },
           ),
         ]);
@@ -434,7 +512,7 @@ export class SessionService {
     return {
       success: true,
       message: "Session completed successfully",
-      session: populatedSession,
+      data: { session: populatedSession },
     };
   }
 
@@ -454,7 +532,7 @@ export class SessionService {
 
     return {
       success: true,
-      data: populatedSession,
+      data: { session: populatedSession },
     };
   }
 
@@ -487,7 +565,7 @@ export class SessionService {
           );
         }
 
-        if (session.status !== SESSION_STATUS.COMPLETED) {
+        if (!canConfirmSessionPayment(session.status)) {
           throw new AppError(
             "Payment can only be confirmed after session completion",
             400,
@@ -519,7 +597,7 @@ export class SessionService {
     return {
       success: true,
       message: "Payment confirmed successfully",
-      session: populatedSession,
+      data: { session: populatedSession },
     };
   }
 
@@ -537,7 +615,7 @@ export class SessionService {
       return {
         success: true,
         hasAction: false,
-        action: "none",
+        action: SESSION_RESUME_ACTION.NONE,
         session: null,
       };
     }
@@ -556,7 +634,7 @@ export class SessionService {
       return {
         success: true,
         hasAction: true,
-        action: "job_session",
+        action: SESSION_RESUME_ACTION.JOB_SESSION,
         session: populatedSession,
       };
     }
@@ -566,7 +644,7 @@ export class SessionService {
         return {
           success: true,
           hasAction: true,
-          action: "review",
+          action: SESSION_RESUME_ACTION.REVIEW,
           session: populatedSession,
         };
       }
@@ -575,7 +653,7 @@ export class SessionService {
         return {
           success: true,
           hasAction: true,
-          action: "payment_confirmation",
+          action: SESSION_RESUME_ACTION.PAYMENT_CONFIRMATION,
           session: populatedSession,
         };
       }
@@ -584,7 +662,7 @@ export class SessionService {
         return {
           success: true,
           hasAction: true,
-          action: "review",
+          action: SESSION_RESUME_ACTION.REVIEW,
           session: populatedSession,
         };
       }
@@ -593,7 +671,7 @@ export class SessionService {
     return {
       success: true,
       hasAction: false,
-      action: "none",
+      action: SESSION_RESUME_ACTION.NONE,
       session: populatedSession,
     };
   }
