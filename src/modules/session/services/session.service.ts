@@ -7,6 +7,7 @@ import { AppError } from "../../../shared/middlewares/errorHandler";
 import { SessionRepository } from "../repositories/session.repository";
 import { SessionEventService } from "./session-event.service";
 import { OrderRepository } from "../../order/repositories/order.repository";
+import { OfferRepository } from "../../offer/repository/offer.repository";
 import { OrderEventService } from "../../order/services/order-event.service";
 import { socketEvents } from "../../../shared/config/socket";
 import {
@@ -16,7 +17,7 @@ import {
 } from "../../../shared/constants/session.constants";
 import { ORDER_STATUS, ORDER_CANCELLED_BY } from "../../../shared/constants/order.constants";
 import { OFFER_STATUS } from "../../../shared/constants/offer.constants";
-import { assertValidSessionTransition, canCancelSession, canCompleteSession, canConfirmSessionPayment } from "../helper/session-state";
+import { assertValidSessionTransition, canCancelSession, canCompleteSession, canConfirmSessionPayment, isSessionTerminal } from "../helper/session-state";
 
 const populateSessionData = async (session: any) => {
   if (!session) return null;
@@ -283,6 +284,13 @@ export class SessionService {
 
         this.ensureParticipant(session, actorUserId);
 
+        if (nextStatus === SESSION_STATUS.COMPLETED) {
+          throw new AppError(
+            "Use the complete endpoint to finish a session",
+            400,
+          );
+        }
+
         if (nextStatus === SESSION_STATUS.CANCELLED) {
           if (!canCancelSession(session.status as string)) {
             throw new AppError("Session cannot be cancelled now", 400);
@@ -314,10 +322,9 @@ export class SessionService {
           await Offer.findByIdAndUpdate(
             session.offerId,
             {
-              $set: {
-                status: OFFER_STATUS.REJECTED,
-                rejectedAt: new Date(),
-              },
+              $set: isCustomer
+                ? { status: OFFER_STATUS.REJECTED, rejectedAt: new Date() }
+                : { status: OFFER_STATUS.WITHDRAWN, withdrawnAt: new Date() },
             },
             { session: dbSession, new: true },
           );
@@ -464,6 +471,13 @@ export class SessionService {
 
         this.ensureSupplier(session, actorUserId);
 
+        if (isSessionTerminal(session.status)) {
+          throw new AppError(
+            `Session is already ${session.status}`,
+            400,
+          );
+        }
+
         if (!canCompleteSession(session)) {
           throw new AppError(
             "Session cannot be completed from its current step",
@@ -485,28 +499,18 @@ export class SessionService {
           throw new AppError("Failed to complete session", 409);
         }
 
-        await Promise.all([
-          Order.findByIdAndUpdate(
-            session.orderId,
-            {
-              $set: {
-                status: ORDER_STATUS.COMPLETED,
-                completedAt: new Date(),
-              },
-            },
-            { new: true, session: dbSession },
-          ),
-          Offer.findByIdAndUpdate(
-            session.offerId,
-            {
-              $set: {
-                status: OFFER_STATUS.COMPLETED,
-                completedAt: new Date(),
-              },
-            },
-            { new: true, session: dbSession },
-          ),
+        const [completedOrder, completedOffer] = await Promise.all([
+          OrderRepository.markCompleted(session.orderId, dbSession),
+          OfferRepository.markCompleted(session.offerId, dbSession),
         ]);
+
+        if (!completedOrder) {
+          throw new AppError("Failed to complete order", 409);
+        }
+
+        if (!completedOffer) {
+          throw new AppError("Failed to complete offer", 409);
+        }
       });
     } finally {
       await dbSession.endSession();

@@ -84,6 +84,17 @@ export class OfferRepository {
     }).sort({ createdAt: -1 });
   }
 
+  static findSupplierOfferForOrder(
+    orderId: Types.ObjectId | string,
+    supplierId: Types.ObjectId | string,
+  ) {
+    return offerModel.find({
+      orderId,
+      supplierId,
+      status: { $in: [OFFER_STATUS.PENDING, OFFER_STATUS.ACCEPTED] },
+    }).sort({ createdAt: -1 });
+  }
+
   static updatePendingOffer(
     offerId: Types.ObjectId | string,
     data: {
@@ -230,6 +241,25 @@ export class OfferRepository {
         $set: {
           status: OFFER_STATUS.WITHDRAWN,
           withdrawnAt: new Date(),
+        },
+      },
+      { new: true, session },
+    );
+  }
+
+  static markCompleted(
+    offerId: Types.ObjectId | string,
+    session?: ClientSession,
+  ) {
+    return offerModel.findOneAndUpdate(
+      {
+        _id: offerId,
+        status: OFFER_STATUS.ACCEPTED,
+      },
+      {
+        $set: {
+          status: OFFER_STATUS.COMPLETED,
+          completedAt: new Date(),
         },
       },
       { new: true, session },

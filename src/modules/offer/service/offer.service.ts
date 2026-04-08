@@ -444,6 +444,9 @@ export class OfferService {
           o.orderId.toString(),
         ),
       }),
+      sessionDoc
+        ? SessionEventService.notifySessionCreated(sessionDoc)
+        : Promise.resolve(),
     ]);
 
     return {
@@ -468,27 +471,37 @@ export class OfferService {
   static async rejectOffer(input: { offerId: string; customerId: string }) {
     const { offerId, customerId } = input;
 
-    const offer = await OfferRepository.findById(offerId);
-    if (!offer) {
-      throw new AppError("Offer not found", 404);
-    }
+    const dbSession = await mongoose.startSession();
+    let rejectedOffer: any;
+    let order: any;
 
-    const order = await orderModel.findById(offer.orderId);
-    if (!order) {
-      throw new AppError("Associated order not found", 404);
-    }
+    try {
+      await dbSession.withTransaction(async () => {
+        const offer = await OfferRepository.findById(offerId, dbSession);
+        if (!offer) {
+          throw new AppError("Offer not found", 404);
+        }
 
-    if (order.customerId.toString() !== customerId) {
-      throw new AppError("Not allowed", 403);
-    }
+        order = await orderModel.findById(offer.orderId).session(dbSession);
+        if (!order) {
+          throw new AppError("Associated order not found", 404);
+        }
 
-    if (order.status !== ORDER_STATUS.PENDING) {
-      throw new AppError("Cannot reject offer for this order now", 400);
-    }
+        if (order.customerId.toString() !== customerId) {
+          throw new AppError("Not allowed", 403);
+        }
 
-    const rejectedOffer = await OfferRepository.rejectPendingOffer(offerId);
-    if (!rejectedOffer) {
-      throw new AppError("Offer not found or already processed", 409);
+        if (order.status !== ORDER_STATUS.PENDING) {
+          throw new AppError("Cannot reject offer for this order now", 400);
+        }
+
+        rejectedOffer = await OfferRepository.rejectPendingOffer(offerId, dbSession);
+        if (!rejectedOffer) {
+          throw new AppError("Offer not found or already processed", 409);
+        }
+      });
+    } finally {
+      await dbSession.endSession();
     }
 
     const io = getIO();
@@ -688,6 +701,10 @@ export class OfferService {
         actorId: supplierId,
         reason: "supplier_deleted_accepted_offer",
       });
+      await SessionEventService.notifySessionCancelled(
+        relatedSession,
+        SESSION_CANCELLED_BY.SUPPLIER,
+      );
     }
 
     io.to(socketRooms.user(relatedOrder.customerId.toString())).emit(
@@ -753,7 +770,13 @@ export class OfferService {
       throw new AppError("Not allowed", 403);
     }
 
-    const offers = await OfferRepository.findOrderOffers(orderId);
+    if (role === "supplier" && order.customerId.toString() === userId) {
+      throw new AppError("Not allowed", 403);
+    }
+
+    const offers = role === "supplier"
+      ? await OfferRepository.findSupplierOfferForOrder(orderId, userId)
+      : await OfferRepository.findOrderOffers(orderId);
 
     const enrichedOffers = await Promise.all(
       offers.map(async (offer: any) => {
@@ -931,6 +954,7 @@ export class OfferService {
     await Promise.all([
       OfferEventService.emitSupplierPendingCountUpdate(supplierId),
       OfferEventService.emitSupplierPendingOffersList(supplierId),
+      SessionEventService.notifySessionCreated(sessionDoc),
     ]);
 
     return {

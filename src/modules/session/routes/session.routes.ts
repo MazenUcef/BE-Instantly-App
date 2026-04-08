@@ -1,7 +1,6 @@
 import { Router } from "express";
 import { authenticate } from "../../../shared/middlewares/auth";
 import {
-  createSession,
   getSessionById,
   getActiveSessionForUser,
   updateSessionStatus,
@@ -11,7 +10,6 @@ import {
   getResumeSessionForUser,
 } from "../controllers/session.controller";
 import {
-  validateCreateSession,
   validateSessionIdParam,
   validateSessionPaymentParam,
   validateOrderIdParam,
@@ -20,13 +18,6 @@ import {
 } from "../validators/session.validation";
 
 const router = Router();
-
-router.post(
-  "/",
-  authenticate,
-  validateCreateSession,
-  createSession,
-);
 
 router.patch(
   "/:id/status",

@@ -15,6 +15,7 @@ export interface IOffer extends Document {
   acceptedAt?: Date | null;
   rejectedAt?: Date | null;
   withdrawnAt?: Date | null;
+  completedAt?: Date | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -68,6 +69,10 @@ const offerSchema = new Schema<IOffer>(
       default: null,
     },
     withdrawnAt: {
+      type: Date,
+      default: null,
+    },
+    completedAt: {
       type: Date,
       default: null,
     },
