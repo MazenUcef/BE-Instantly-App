@@ -1,11 +1,18 @@
 import mongoose, { Schema, Document } from "mongoose";
 
+export interface ISessionWorkflowDef {
+  key: string;
+  label: string;
+  steps: string[];
+}
+
 export interface ICategory extends Document {
   name: string;
   normalizedName: string;
   description?: string | null;
   image?: string | null;
   jobs: string[];
+  workflows: ISessionWorkflowDef[];
   isActive: boolean;
   createdAt: Date;
   updatedAt: Date;
@@ -41,6 +48,16 @@ const CategorySchema = new Schema<ICategory>(
     },
     jobs: {
       type: [String],
+      default: [],
+    },
+    workflows: {
+      type: [
+        {
+          key: { type: String, required: true, trim: true },
+          label: { type: String, required: true, trim: true },
+          steps: [{ type: String, required: true, trim: true }],
+        },
+      ],
       default: [],
     },
     isActive: {

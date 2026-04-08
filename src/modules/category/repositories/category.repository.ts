@@ -1,5 +1,5 @@
 import { ClientSession, Types } from "mongoose";
-import CategoryModel from "../models/Category.model";
+import CategoryModel, { ISessionWorkflowDef } from "../models/Category.model";
 
 export class CategoryRepository {
   static findActive(session?: ClientSession) {
@@ -32,6 +32,7 @@ export class CategoryRepository {
       description?: string | null;
       image?: string | null;
       jobs: string[];
+      workflows: ISessionWorkflowDef[];
       isActive?: boolean;
     },
     session?: ClientSession,

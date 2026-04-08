@@ -9,6 +9,7 @@ export class SessionRepository {
       offerId: Types.ObjectId | string;
       customerId: Types.ObjectId | string;
       supplierId: Types.ObjectId | string;
+      workflowSteps: string[];
       status?: string;
       startedAt?: Date;
     },
@@ -77,12 +78,13 @@ export class SessionRepository {
 
   static markCompleted(
     sessionId: Types.ObjectId | string,
+    lastWorkflowStep: string,
     session?: ClientSession,
   ) {
     return SessionModel.findOneAndUpdate(
       {
         _id: sessionId,
-        status: SESSION_STATUS.WORK_STARTED,
+        status: lastWorkflowStep,
       },
       {
         $set: {

@@ -2,7 +2,6 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.validateUpdateSessionStatus = exports.validateUserIdParam = exports.validateOrderIdParam = exports.validateSessionPaymentParam = exports.validateSessionIdParam = exports.validateCreateSession = void 0;
 const express_validator_1 = require("express-validator");
-const session_constants_1 = require("../../../shared/constants/session.constants");
 const handleValidationErrors = (req, res, next) => {
     const errors = (0, express_validator_1.validationResult)(req);
     if (!errors.isEmpty()) {
@@ -41,13 +40,14 @@ exports.validateUpdateSessionStatus = [
     (0, express_validator_1.param)("id").isMongoId().withMessage("Invalid session id"),
     (0, express_validator_1.body)("status")
         .notEmpty()
-        .isIn([
-        session_constants_1.SESSION_STATUS.ON_THE_WAY,
-        session_constants_1.SESSION_STATUS.ARRIVED,
-        session_constants_1.SESSION_STATUS.WORK_STARTED,
-        session_constants_1.SESSION_STATUS.CANCELLED,
-    ])
-        .withMessage("Invalid status"),
+        .withMessage("status is required")
+        .bail()
+        .isString()
+        .withMessage("status must be a string")
+        .bail()
+        .trim()
+        .isLength({ min: 2, max: 50 })
+        .withMessage("status must be between 2 and 50 characters"),
     (0, express_validator_1.body)("reason")
         .optional()
         .isString()

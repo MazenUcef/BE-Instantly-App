@@ -1,38 +1,52 @@
-import { SESSION_PROGRESS_TRANSITIONS, SESSION_STATUS, SESSION_TERMINAL_STATUSES, SessionStatus } from "../../../shared/constants/session.constants";
+import { SESSION_STATUS, SESSION_TERMINAL_STATUSES } from "../../../shared/constants/session.constants";
 import { AppError } from "../../../shared/middlewares/errorHandler";
 
+const buildFullFlow = (workflowSteps: string[]) => [
+  SESSION_STATUS.STARTED,
+  ...workflowSteps,
+  SESSION_STATUS.COMPLETED,
+];
 
 export const assertValidSessionTransition = (
-  currentStatus: SessionStatus,
-  nextStatus: SessionStatus,
+  workflowSteps: string[],
+  currentStatus: string,
+  nextStatus: string,
 ) => {
-  const allowed = SESSION_PROGRESS_TRANSITIONS[currentStatus] || [];
+  const fullFlow = buildFullFlow(workflowSteps);
+  const currentIndex = fullFlow.indexOf(currentStatus);
 
-  if (!allowed.includes(nextStatus)) {
+  if (currentIndex === -1) {
+    throw new AppError(`Unknown current status "${currentStatus}"`, 400);
+  }
+
+  const expectedNext = fullFlow[currentIndex + 1];
+
+  if (expectedNext !== nextStatus) {
     throw new AppError(
-      `Invalid session status transition from "${currentStatus}" to "${nextStatus}"`,
+      `Invalid session status transition from "${currentStatus}" to "${nextStatus}". Expected "${expectedNext}"`,
       400,
     );
   }
 };
 
-export const isSessionTerminal = (status: SessionStatus) => {
-  return (SESSION_TERMINAL_STATUSES as readonly SessionStatus[]).includes(status);
+export const isSessionTerminal = (status: string) => {
+  return (SESSION_TERMINAL_STATUSES as readonly string[]).includes(status);
 };
 
-export const canConfirmSessionPayment = (status: SessionStatus) => {
+export const canConfirmSessionPayment = (status: string) => {
   return status === SESSION_STATUS.COMPLETED;
 };
 
-export const canCompleteSession = (status: SessionStatus) => {
-  return status === SESSION_STATUS.WORK_STARTED;
+export const canCompleteSession = (session: {
+  workflowSteps: string[];
+  status: string;
+}) => {
+  const lastStep =
+    session.workflowSteps[session.workflowSteps.length - 1] ??
+    SESSION_STATUS.STARTED;
+  return session.status === lastStep;
 };
 
-export const canCancelSession = (status: SessionStatus) => {
-  return [
-    SESSION_STATUS.STARTED,
-    SESSION_STATUS.ON_THE_WAY,
-    SESSION_STATUS.ARRIVED,
-    SESSION_STATUS.WORK_STARTED,
-  ].includes(status as "started" | "on_the_way" | "arrived" | "work_started");
+export const canCancelSession = (status: string) => {
+  return !isSessionTerminal(status);
 };

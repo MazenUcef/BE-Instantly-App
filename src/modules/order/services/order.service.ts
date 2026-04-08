@@ -31,6 +31,7 @@ export class OrderService {
     categoryId: string;
     governmentId: string;
     jobTitle: string;
+    selectedWorkflow: string;
   }) {
     const [government, category] = await Promise.all([
       governmentModel.findById(input.governmentId),
@@ -49,6 +50,21 @@ export class OrderService {
     if (!category.jobs || !category.jobs.includes(input.jobTitle)) {
       const error = new AppError("Invalid job title for this category", 400);
       (error as any).availableJobTitles = category.jobs || [];
+      throw error;
+    }
+
+    const workflow = category.workflows?.find(
+      (w) => w.key === input.selectedWorkflow,
+    );
+
+    if (!workflow) {
+      const error = new AppError(
+        "Invalid workflow for this category",
+        400,
+      );
+      (error as any).availableWorkflows = (category.workflows || []).map(
+        (w) => w.key,
+      );
       throw error;
     }
 
@@ -93,6 +109,7 @@ export class OrderService {
     timeToStart?: string | Date | null;
     jobTitle: string;
     orderType: "contract" | "daily";
+    selectedWorkflow: string;
   }) {
     const {
       customerId,
@@ -105,6 +122,7 @@ export class OrderService {
       timeToStart,
       jobTitle,
       orderType,
+      selectedWorkflow,
     } = input;
 
     const dbSession = await mongoose.startSession();
@@ -120,6 +138,7 @@ export class OrderService {
           categoryId,
           governmentId,
           jobTitle,
+          selectedWorkflow,
         });
 
         await this.ensureCustomerCanCreateOrder(customerId, dbSession);
@@ -136,6 +155,7 @@ export class OrderService {
             requestedPrice,
             timeToStart: timeToStart || null,
             orderType,
+            selectedWorkflow,
             status: ORDER_STATUS.PENDING,
           },
           dbSession,

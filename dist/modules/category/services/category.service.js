@@ -20,6 +20,24 @@ const normalizeJobs = (jobs) => {
         .filter(Boolean);
     return Array.from(new Set(cleaned));
 };
+const normalizeWorkflows = (workflows) => {
+    if (!Array.isArray(workflows))
+        return [];
+    const normalized = workflows.map((w) => ({
+        key: String(w.key ?? "").trim().toLowerCase().replace(/\s+/g, "_"),
+        label: String(w.label ?? "").trim(),
+        steps: Array.isArray(w.steps)
+            ? Array.from(new Set(w.steps
+                .map((s) => String(s).trim().toLowerCase().replace(/\s+/g, "_"))
+                .filter(Boolean)))
+            : [],
+    }));
+    const keys = normalized.map((w) => w.key);
+    if (new Set(keys).size !== keys.length) {
+        throw new errorHandler_1.AppError("Workflow keys must be unique within a category", 400);
+    }
+    return normalized;
+};
 class CategoryService {
     static async createCategory(req) {
         const dbSession = await mongoose_1.default.startSession();
@@ -29,6 +47,7 @@ class CategoryService {
                 const files = req.files;
                 const { name, description } = req.body;
                 const jobs = normalizeJobs(req.body.jobs);
+                const workflows = normalizeWorkflows(req.body.workflows);
                 const normalizedName = normalizeCategoryName(name);
                 const existingCategory = await category_repository_1.CategoryRepository.findByNormalizedName(normalizedName, dbSession);
                 if (existingCategory) {
@@ -52,6 +71,7 @@ class CategoryService {
                     description: description?.trim?.() || null,
                     image: imageUrl,
                     jobs,
+                    workflows,
                     isActive: true,
                 }, dbSession);
             });
@@ -121,6 +141,9 @@ class CategoryService {
                 }
                 if (req.body.jobs !== undefined) {
                     updates.jobs = normalizeJobs(req.body.jobs);
+                }
+                if (req.body.workflows !== undefined) {
+                    updates.workflows = normalizeWorkflows(req.body.workflows);
                 }
                 if (files?.image?.[0]) {
                     (0, helpers_1.validateFile)(files.image[0]);

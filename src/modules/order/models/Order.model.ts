@@ -19,6 +19,7 @@ export interface IOrder extends Document {
   description: string;
   requestedPrice: number;
   orderType: OrderType;
+  selectedWorkflow: string;
   status: OrderStatus;
   finalPrice?: number | null;
   customerReviewed: boolean;
@@ -92,6 +93,11 @@ const orderSchema = new Schema<IOrder>(
       enum: Object.values(ORDER_TYPE),
       required: true,
       default: ORDER_TYPE.DAILY,
+    },
+    selectedWorkflow: {
+      type: String,
+      required: true,
+      trim: true,
     },
     timeToStart: {
       type: Date,

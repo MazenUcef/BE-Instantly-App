@@ -13,6 +13,7 @@ export const createOrder = async (req: any, res: Response) => {
     timeToStart: req.body.timeToStart,
     jobTitle: req.body.jobTitle,
     orderType: req.body.orderType,
+    selectedWorkflow: req.body.selectedWorkflow,
   });
 
   return res.status(201).json(result);

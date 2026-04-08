@@ -1,6 +1,5 @@
 import { Request, Response, NextFunction, RequestHandler } from "express";
 import { body, param, validationResult } from "express-validator";
-import { SESSION_STATUS } from "../../../shared/constants/session.constants";
 
 const handleValidationErrors = (
   req: Request,
@@ -52,13 +51,14 @@ export const validateUpdateSessionStatus: RequestHandler[] = [
   param("id").isMongoId().withMessage("Invalid session id"),
   body("status")
     .notEmpty()
-    .isIn([
-      SESSION_STATUS.ON_THE_WAY,
-      SESSION_STATUS.ARRIVED,
-      SESSION_STATUS.WORK_STARTED,
-      SESSION_STATUS.CANCELLED,
-    ])
-    .withMessage("Invalid status"),
+    .withMessage("status is required")
+    .bail()
+    .isString()
+    .withMessage("status must be a string")
+    .bail()
+    .trim()
+    .isLength({ min: 2, max: 50 })
+    .withMessage("status must be between 2 and 50 characters"),
   body("reason")
     .optional()
     .isString()

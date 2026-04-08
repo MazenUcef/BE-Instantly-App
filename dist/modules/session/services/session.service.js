@@ -8,6 +8,7 @@ const mongoose_1 = __importDefault(require("mongoose"));
 const Order_model_1 = __importDefault(require("../../order/models/Order.model"));
 const Offer_model_1 = __importDefault(require("../../offer/models/Offer.model"));
 const User_model_1 = __importDefault(require("../../auth/models/User.model"));
+const Category_model_1 = __importDefault(require("../../category/models/Category.model"));
 const errorHandler_1 = require("../../../shared/middlewares/errorHandler");
 const session_repository_1 = require("../repositories/session.repository");
 const session_event_service_1 = require("./session-event.service");
@@ -18,11 +19,6 @@ const session_constants_1 = require("../../../shared/constants/session.constants
 const order_constants_1 = require("../../../shared/constants/order.constants");
 const offer_constants_1 = require("../../../shared/constants/offer.constants");
 const session_state_1 = require("../helper/session-state");
-const SESSION_STATUS_TO_TIMESTAMP_FIELD = {
-    [session_constants_1.SESSION_STATUS.ON_THE_WAY]: "onTheWayAt",
-    [session_constants_1.SESSION_STATUS.ARRIVED]: "arrivedAt",
-    [session_constants_1.SESSION_STATUS.WORK_STARTED]: "workStartedAt",
-};
 const populateSessionData = async (session) => {
     if (!session)
         return null;
@@ -95,7 +91,15 @@ class SessionService {
         if (existingOfferSession) {
             throw new errorHandler_1.AppError("Session already exists for this offer", 409);
         }
-        return { order, offer };
+        const category = await Category_model_1.default.findById(order.categoryId).session(dbSession);
+        if (!category) {
+            throw new errorHandler_1.AppError("Category not found", 404);
+        }
+        const workflow = category.workflows?.find((w) => w.key === order.selectedWorkflow);
+        if (!workflow) {
+            throw new errorHandler_1.AppError("Workflow not found for this order's category", 400);
+        }
+        return { order, offer, workflowSteps: workflow.steps };
     }
     static async createSession(input) {
         const { orderId, offerId, customerId, supplierId } = input;
@@ -103,7 +107,7 @@ class SessionService {
         let createdSession;
         try {
             await dbSession.withTransaction(async () => {
-                await this.validateSessionCreationInput({ orderId, offerId, customerId, supplierId }, dbSession);
+                const { workflowSteps } = await this.validateSessionCreationInput({ orderId, offerId, customerId, supplierId }, dbSession);
                 const existingCustomerSession = await session_repository_1.SessionRepository.findActiveByUser(customerId, dbSession);
                 if (existingCustomerSession &&
                     existingCustomerSession.customerId.toString() === customerId) {
@@ -119,6 +123,7 @@ class SessionService {
                     offerId,
                     customerId,
                     supplierId,
+                    workflowSteps,
                     status: session_constants_1.SESSION_STATUS.STARTED,
                     startedAt: new Date(),
                 }, dbSession);
@@ -228,9 +233,8 @@ class SessionService {
                     return;
                 }
                 this.ensureSupplier(session, actorUserId);
-                (0, session_state_1.assertValidSessionTransition)(session.status, nextStatus);
-                const timestampField = SESSION_STATUS_TO_TIMESTAMP_FIELD[nextStatus];
-                const extraSet = timestampField ? { [timestampField]: new Date() } : {};
+                (0, session_state_1.assertValidSessionTransition)(session.workflowSteps, session.status, nextStatus);
+                const extraSet = { [`stepTimestamps.${nextStatus}`]: new Date() };
                 updatedSession = await session_repository_1.SessionRepository.updateStatus(sessionId, session.status, nextStatus, extraSet, dbSession);
                 if (!updatedSession) {
                     throw new errorHandler_1.AppError("Failed to update session status", 409);
@@ -292,10 +296,12 @@ class SessionService {
                     throw new errorHandler_1.AppError("Session not found", 404);
                 }
                 this.ensureSupplier(session, actorUserId);
-                if (!(0, session_state_1.canCompleteSession)(session.status)) {
-                    throw new errorHandler_1.AppError("Session can only be completed after work has started", 400);
+                if (!(0, session_state_1.canCompleteSession)(session)) {
+                    throw new errorHandler_1.AppError("Session cannot be completed from its current step", 400);
                 }
-                completedSession = await session_repository_1.SessionRepository.markCompleted(sessionId, dbSession);
+                const lastWorkflowStep = session.workflowSteps[session.workflowSteps.length - 1] ??
+                    session_constants_1.SESSION_STATUS.STARTED;
+                completedSession = await session_repository_1.SessionRepository.markCompleted(sessionId, lastWorkflowStep, dbSession);
                 if (!completedSession) {
                     throw new errorHandler_1.AppError("Failed to complete session", 409);
                 }

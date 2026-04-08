@@ -38,6 +38,12 @@ class OrderService {
             error.availableJobTitles = category.jobs || [];
             throw error;
         }
+        const workflow = category.workflows?.find((w) => w.key === input.selectedWorkflow);
+        if (!workflow) {
+            const error = new errorHandler_1.AppError("Invalid workflow for this category", 400);
+            error.availableWorkflows = (category.workflows || []).map((w) => w.key);
+            throw error;
+        }
         return { government, category };
     }
     static async ensureCustomerCanCreateOrder(customerId, dbSession) {
@@ -56,7 +62,7 @@ class OrderService {
         }
     }
     static async createOrder(input) {
-        const { customerId, customerName, address, description, categoryId, governmentId, requestedPrice, timeToStart, jobTitle, orderType, } = input;
+        const { customerId, customerName, address, description, categoryId, governmentId, requestedPrice, timeToStart, jobTitle, orderType, selectedWorkflow, } = input;
         const dbSession = await mongoose_1.default.startSession();
         let order;
         try {
@@ -68,6 +74,7 @@ class OrderService {
                     categoryId,
                     governmentId,
                     jobTitle,
+                    selectedWorkflow,
                 });
                 await this.ensureCustomerCanCreateOrder(customerId, dbSession);
                 order = await order_repository_1.OrderRepository.createOrder({
@@ -81,6 +88,7 @@ class OrderService {
                     requestedPrice,
                     timeToStart: timeToStart || null,
                     orderType,
+                    selectedWorkflow,
                     status: order_constants_1.ORDER_STATUS.PENDING,
                 }, dbSession);
             });

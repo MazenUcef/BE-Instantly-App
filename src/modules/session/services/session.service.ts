@@ -2,6 +2,7 @@ import mongoose from "mongoose";
 import Order from "../../order/models/Order.model";
 import Offer from "../../offer/models/Offer.model";
 import UserModel from "../../auth/models/User.model";
+import CategoryModel from "../../category/models/Category.model";
 import { AppError } from "../../../shared/middlewares/errorHandler";
 import { SessionRepository } from "../repositories/session.repository";
 import { SessionEventService } from "./session-event.service";
@@ -12,18 +13,10 @@ import {
   SESSION_STATUS,
   SESSION_CANCELLED_BY,
   SESSION_RESUME_ACTION,
-  SessionStatus,
 } from "../../../shared/constants/session.constants";
 import { ORDER_STATUS, ORDER_CANCELLED_BY } from "../../../shared/constants/order.constants";
 import { OFFER_STATUS } from "../../../shared/constants/offer.constants";
 import { assertValidSessionTransition, canCancelSession, canCompleteSession, canConfirmSessionPayment } from "../helper/session-state";
-
-
-const SESSION_STATUS_TO_TIMESTAMP_FIELD: Record<string, string> = {
-  [SESSION_STATUS.ON_THE_WAY]: "onTheWayAt",
-  [SESSION_STATUS.ARRIVED]: "arrivedAt",
-  [SESSION_STATUS.WORK_STARTED]: "workStartedAt",
-};
 
 const populateSessionData = async (session: any) => {
   if (!session) return null;
@@ -130,7 +123,21 @@ export class SessionService {
       throw new AppError("Session already exists for this offer", 409);
     }
 
-    return { order, offer };
+    const category = await CategoryModel.findById(order.categoryId).session(dbSession);
+
+    if (!category) {
+      throw new AppError("Category not found", 404);
+    }
+
+    const workflow = category.workflows?.find(
+      (w) => w.key === (order as any).selectedWorkflow,
+    );
+
+    if (!workflow) {
+      throw new AppError("Workflow not found for this order's category", 400);
+    }
+
+    return { order, offer, workflowSteps: workflow.steps };
   }
 
   static async createSession(input: {
@@ -146,7 +153,7 @@ export class SessionService {
 
     try {
       await dbSession.withTransaction(async () => {
-        await this.validateSessionCreationInput(
+        const { workflowSteps } = await this.validateSessionCreationInput(
           { orderId, offerId, customerId, supplierId },
           dbSession,
         );
@@ -181,6 +188,7 @@ export class SessionService {
             offerId,
             customerId,
             supplierId,
+            workflowSteps,
             status: SESSION_STATUS.STARTED,
             startedAt: new Date(),
           },
@@ -255,7 +263,7 @@ export class SessionService {
   static async updateSessionStatus(input: {
     sessionId: string;
     actorUserId: string;
-    nextStatus: SessionStatus;
+    nextStatus: string;
     reason?: string;
   }) {
     const { sessionId, actorUserId, nextStatus, reason } = input;
@@ -276,7 +284,7 @@ export class SessionService {
         this.ensureParticipant(session, actorUserId);
 
         if (nextStatus === SESSION_STATUS.CANCELLED) {
-          if (!canCancelSession(session.status)) {
+          if (!canCancelSession(session.status as string)) {
             throw new AppError("Session cannot be cancelled now", 400);
           }
 
@@ -345,10 +353,9 @@ export class SessionService {
         }
 
         this.ensureSupplier(session, actorUserId);
-        assertValidSessionTransition(session.status, nextStatus);
+        assertValidSessionTransition(session.workflowSteps, session.status, nextStatus);
 
-        const timestampField = SESSION_STATUS_TO_TIMESTAMP_FIELD[nextStatus];
-        const extraSet = timestampField ? { [timestampField]: new Date() } : {};
+        const extraSet = { [`stepTimestamps.${nextStatus}`]: new Date() };
 
         updatedSession = await SessionRepository.updateStatus(
           sessionId,
@@ -457,15 +464,20 @@ export class SessionService {
 
         this.ensureSupplier(session, actorUserId);
 
-        if (!canCompleteSession(session.status)) {
+        if (!canCompleteSession(session)) {
           throw new AppError(
-            "Session can only be completed after work has started",
+            "Session cannot be completed from its current step",
             400,
           );
         }
 
+        const lastWorkflowStep =
+          session.workflowSteps[session.workflowSteps.length - 1] ??
+          SESSION_STATUS.STARTED;
+
         completedSession = await SessionRepository.markCompleted(
           sessionId,
+          lastWorkflowStep,
           dbSession,
         );
 

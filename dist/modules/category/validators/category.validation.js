@@ -29,9 +29,60 @@ const parseJobsIfNeeded = (req, _res, next) => {
     }
     next();
 };
+const parseWorkflowsIfNeeded = (req, _res, next) => {
+    if (typeof req.body.workflows === "string") {
+        try {
+            req.body.workflows = JSON.parse(req.body.workflows);
+        }
+        catch {
+            // leave as-is, validator will fail
+        }
+    }
+    next();
+};
+const workflowValidationRules = () => [
+    (0, express_validator_1.body)("workflows")
+        .optional()
+        .isArray()
+        .withMessage("workflows must be an array"),
+    (0, express_validator_1.body)("workflows.*.key")
+        .isString()
+        .withMessage("Workflow key must be a string")
+        .bail()
+        .trim()
+        .notEmpty()
+        .withMessage("Workflow key cannot be empty")
+        .bail()
+        .isLength({ min: 2, max: 50 })
+        .withMessage("Workflow key must be between 2 and 50 characters"),
+    (0, express_validator_1.body)("workflows.*.label")
+        .isString()
+        .withMessage("Workflow label must be a string")
+        .bail()
+        .trim()
+        .notEmpty()
+        .withMessage("Workflow label cannot be empty")
+        .bail()
+        .isLength({ min: 2, max: 100 })
+        .withMessage("Workflow label must be between 2 and 100 characters"),
+    (0, express_validator_1.body)("workflows.*.steps")
+        .isArray({ min: 1 })
+        .withMessage("Workflow steps must be a non-empty array"),
+    (0, express_validator_1.body)("workflows.*.steps.*")
+        .isString()
+        .withMessage("Each workflow step must be a string")
+        .bail()
+        .trim()
+        .notEmpty()
+        .withMessage("Workflow step cannot be empty")
+        .bail()
+        .isLength({ min: 2, max: 50 })
+        .withMessage("Each workflow step must be between 2 and 50 characters"),
+];
 exports.validateCreateCategory = [
     multer_1.default.fields([{ name: "image", maxCount: 1 }]),
     parseJobsIfNeeded,
+    parseWorkflowsIfNeeded,
     (0, express_validator_1.body)("name")
         .notEmpty()
         .withMessage("Category name is required")
@@ -73,6 +124,7 @@ exports.validateCreateCategory = [
         .bail()
         .isLength({ min: 2, max: 100 })
         .withMessage("Each job must be between 2 and 100 characters"),
+    ...workflowValidationRules(),
     exports.handleValidationErrors,
 ];
 exports.validateGetCategoryById = [
@@ -82,6 +134,7 @@ exports.validateGetCategoryById = [
 exports.validateUpdateCategory = [
     multer_1.default.fields([{ name: "image", maxCount: 1 }]),
     parseJobsIfNeeded,
+    parseWorkflowsIfNeeded,
     (0, express_validator_1.param)("id").isMongoId().withMessage("Invalid category ID"),
     (0, express_validator_1.body)("name")
         .optional()
@@ -122,6 +175,7 @@ exports.validateUpdateCategory = [
         .bail()
         .isLength({ min: 2, max: 100 })
         .withMessage("Each job must be between 2 and 100 characters"),
+    ...workflowValidationRules(),
     exports.handleValidationErrors,
 ];
 exports.validateDeleteCategory = [

@@ -14,6 +14,7 @@ export class OrderRepository {
       description: string;
       requestedPrice: number;
       orderType: string;
+      selectedWorkflow: string;
       timeToStart?: Date | string | null;
       status?: string;
     },

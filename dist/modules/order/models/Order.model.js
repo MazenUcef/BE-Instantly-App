@@ -95,6 +95,11 @@ const orderSchema = new mongoose_1.Schema({
         required: true,
         default: order_constants_1.ORDER_TYPE.DAILY,
     },
+    selectedWorkflow: {
+        type: String,
+        required: true,
+        trim: true,
+    },
     timeToStart: {
         type: Date,
         default: null,

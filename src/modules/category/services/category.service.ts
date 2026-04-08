@@ -5,6 +5,7 @@ import { uploadToCloudinary } from "../../../shared/utils/cloudinary";
 import { validateFile } from "../../../shared/utils/helpers";
 import { publishToQueue } from "../../../shared/config/rabbitmq";
 import { CATEGORY_QUEUE_EVENTS } from "../../../shared/constants/category.constants";
+import { ISessionWorkflowDef } from "../models/Category.model";
 
 const normalizeCategoryName = (name: string) =>
   name.trim().toLowerCase().replace(/\s+/g, " ");
@@ -19,6 +20,33 @@ const normalizeJobs = (jobs: unknown): string[] => {
   return Array.from(new Set(cleaned));
 };
 
+const normalizeWorkflows = (workflows: unknown): ISessionWorkflowDef[] => {
+  if (!Array.isArray(workflows)) return [];
+
+  const normalized: ISessionWorkflowDef[] = workflows.map((w) => ({
+    key: String(w.key ?? "").trim().toLowerCase().replace(/\s+/g, "_"),
+    label: String(w.label ?? "").trim(),
+    steps: Array.isArray(w.steps)
+      ? (Array.from(
+          new Set(
+            w.steps
+              .map((s: any) =>
+                String(s).trim().toLowerCase().replace(/\s+/g, "_"),
+              )
+              .filter(Boolean),
+          ),
+        ) as string[])
+      : [],
+  }));
+
+  const keys = normalized.map((w) => w.key);
+  if (new Set(keys).size !== keys.length) {
+    throw new AppError("Workflow keys must be unique within a category", 400);
+  }
+
+  return normalized;
+};
+
 export class CategoryService {
   static async createCategory(req: any) {
     const dbSession = await mongoose.startSession();
@@ -30,6 +58,7 @@ export class CategoryService {
         const files = req.files as any;
         const { name, description } = req.body;
         const jobs = normalizeJobs(req.body.jobs);
+        const workflows = normalizeWorkflows(req.body.workflows);
 
         const normalizedName = normalizeCategoryName(name);
 
@@ -61,6 +90,7 @@ export class CategoryService {
             description: description?.trim?.() || null,
             image: imageUrl,
             jobs,
+            workflows,
             isActive: true,
           },
           dbSession,
@@ -152,6 +182,10 @@ export class CategoryService {
 
         if (req.body.jobs !== undefined) {
           updates.jobs = normalizeJobs(req.body.jobs);
+        }
+
+        if (req.body.workflows !== undefined) {
+          updates.workflows = normalizeWorkflows(req.body.workflows);
         }
 
         if (files?.image?.[0]) {

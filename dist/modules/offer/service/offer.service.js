@@ -8,6 +8,7 @@ const mongoose_1 = __importDefault(require("mongoose"));
 const User_model_1 = __importDefault(require("../../auth/models/User.model"));
 const Order_model_1 = __importDefault(require("../../order/models/Order.model"));
 const session_model_1 = __importDefault(require("../../session/models/session.model"));
+const Category_model_1 = __importDefault(require("../../category/models/Category.model"));
 const errorHandler_1 = require("../../../shared/middlewares/errorHandler");
 const offer_event_service_1 = require("./offer-event.service");
 const order_constants_1 = require("../../../shared/constants/order.constants");
@@ -20,6 +21,15 @@ const order_event_service_1 = require("../../order/services/order-event.service"
 const session_repository_1 = require("../../session/repositories/session.repository");
 const session_event_service_1 = require("../../session/services/session-event.service");
 const session_constants_1 = require("../../../shared/constants/session.constants");
+async function resolveWorkflowSteps(order, dbSession) {
+    const category = await Category_model_1.default.findById(order.categoryId).session(dbSession || null);
+    if (!category)
+        throw new errorHandler_1.AppError("Category not found", 404);
+    const workflow = category.workflows?.find((w) => w.key === order.selectedWorkflow);
+    if (!workflow)
+        throw new errorHandler_1.AppError("Workflow not found for this order's category", 400);
+    return workflow.steps;
+}
 class OfferService {
     static async ensureSupplierCanCreateOffer(supplierId, dbSession) {
         const [reviewRequiredOrder, activeAcceptedOffer] = await Promise.all([
@@ -197,11 +207,13 @@ class OfferService {
                 if (!updatedOrder) {
                     throw new errorHandler_1.AppError("Order state changed concurrently", 409);
                 }
+                const workflowSteps = await resolveWorkflowSteps(order, dbSession);
                 sessionDoc = await session_repository_1.SessionRepository.createSession({
                     orderId: order._id,
                     offerId: offer._id,
                     customerId: order.customerId,
                     supplierId: offer.supplierId,
+                    workflowSteps,
                     status: session_constants_1.SESSION_STATUS.STARTED,
                     startedAt: new Date(),
                 }, dbSession);
@@ -551,11 +563,13 @@ class OfferService {
                 if (!updatedOrder) {
                     throw new errorHandler_1.AppError("Order state changed concurrently", 409);
                 }
+                const workflowSteps = await resolveWorkflowSteps(order, dbSession);
                 sessionDoc = await session_repository_1.SessionRepository.createSession({
                     orderId: order._id,
                     offerId: offer._id,
                     customerId: order.customerId,
                     supplierId,
+                    workflowSteps,
                     status: session_constants_1.SESSION_STATUS.STARTED,
                     startedAt: new Date(),
                 }, dbSession);

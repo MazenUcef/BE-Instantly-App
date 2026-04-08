@@ -31,9 +31,65 @@ const parseJobsIfNeeded: RequestHandler = (req, _res, next) => {
   next();
 };
 
+const parseWorkflowsIfNeeded: RequestHandler = (req, _res, next) => {
+  if (typeof req.body.workflows === "string") {
+    try {
+      req.body.workflows = JSON.parse(req.body.workflows);
+    } catch {
+      // leave as-is, validator will fail
+    }
+  }
+  next();
+};
+
+const workflowValidationRules = () => [
+  body("workflows")
+    .optional()
+    .isArray()
+    .withMessage("workflows must be an array"),
+
+  body("workflows.*.key")
+    .isString()
+    .withMessage("Workflow key must be a string")
+    .bail()
+    .trim()
+    .notEmpty()
+    .withMessage("Workflow key cannot be empty")
+    .bail()
+    .isLength({ min: 2, max: 50 })
+    .withMessage("Workflow key must be between 2 and 50 characters"),
+
+  body("workflows.*.label")
+    .isString()
+    .withMessage("Workflow label must be a string")
+    .bail()
+    .trim()
+    .notEmpty()
+    .withMessage("Workflow label cannot be empty")
+    .bail()
+    .isLength({ min: 2, max: 100 })
+    .withMessage("Workflow label must be between 2 and 100 characters"),
+
+  body("workflows.*.steps")
+    .isArray({ min: 1 })
+    .withMessage("Workflow steps must be a non-empty array"),
+
+  body("workflows.*.steps.*")
+    .isString()
+    .withMessage("Each workflow step must be a string")
+    .bail()
+    .trim()
+    .notEmpty()
+    .withMessage("Workflow step cannot be empty")
+    .bail()
+    .isLength({ min: 2, max: 50 })
+    .withMessage("Each workflow step must be between 2 and 50 characters"),
+];
+
 export const validateCreateCategory: RequestHandler[] = [
   upload.fields([{ name: "image", maxCount: 1 }]),
   parseJobsIfNeeded,
+  parseWorkflowsIfNeeded,
 
   body("name")
     .notEmpty()
@@ -81,6 +137,8 @@ export const validateCreateCategory: RequestHandler[] = [
     .isLength({ min: 2, max: 100 })
     .withMessage("Each job must be between 2 and 100 characters"),
 
+  ...workflowValidationRules(),
+
   handleValidationErrors,
 ];
 
@@ -92,6 +150,7 @@ export const validateGetCategoryById: RequestHandler[] = [
 export const validateUpdateCategory: RequestHandler[] = [
   upload.fields([{ name: "image", maxCount: 1 }]),
   parseJobsIfNeeded,
+  parseWorkflowsIfNeeded,
 
   param("id").isMongoId().withMessage("Invalid category ID"),
 
@@ -138,6 +197,8 @@ export const validateUpdateCategory: RequestHandler[] = [
     .bail()
     .isLength({ min: 2, max: 100 })
     .withMessage("Each job must be between 2 and 100 characters"),
+
+  ...workflowValidationRules(),
 
   handleValidationErrors,
 ];

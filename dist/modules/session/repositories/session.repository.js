@@ -43,10 +43,10 @@ class SessionRepository {
             },
         }, { new: true, session });
     }
-    static markCompleted(sessionId, session) {
+    static markCompleted(sessionId, lastWorkflowStep, session) {
         return session_model_1.default.findOneAndUpdate({
             _id: sessionId,
-            status: session_constants_1.SESSION_STATUS.WORK_STARTED,
+            status: lastWorkflowStep,
         }, {
             $set: {
                 status: session_constants_1.SESSION_STATUS.COMPLETED,

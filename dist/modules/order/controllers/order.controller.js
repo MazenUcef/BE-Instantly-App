@@ -14,6 +14,7 @@ const createOrder = async (req, res) => {
         timeToStart: req.body.timeToStart,
         jobTitle: req.body.jobTitle,
         orderType: req.body.orderType,
+        selectedWorkflow: req.body.selectedWorkflow,
     });
     return res.status(201).json(result);
 };

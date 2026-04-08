@@ -25,6 +25,14 @@ exports.validateCreateOrder = [
         .notEmpty()
         .isIn(Object.values(order_constants_1.ORDER_TYPE))
         .withMessage("Invalid orderType"),
+    (0, express_validator_1.body)("selectedWorkflow")
+        .notEmpty()
+        .isString()
+        .withMessage("selectedWorkflow is required")
+        .bail()
+        .trim()
+        .isLength({ min: 2, max: 50 })
+        .withMessage("selectedWorkflow must be between 2 and 50 characters"),
     (0, express_validator_1.body)("timeToStart")
         .optional({ nullable: true })
         .isISO8601()

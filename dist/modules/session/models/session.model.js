@@ -60,6 +60,16 @@ const JobSessionSchema = new mongoose_1.Schema({
         required: true,
         index: true,
     },
+    workflowSteps: {
+        type: [String],
+        required: true,
+        default: [],
+    },
+    stepTimestamps: {
+        type: Map,
+        of: Date,
+        default: {},
+    },
     paymentConfirmed: {
         type: Boolean,
         default: false,
@@ -71,7 +81,6 @@ const JobSessionSchema = new mongoose_1.Schema({
     },
     status: {
         type: String,
-        enum: Object.values(session_constants_1.SESSION_STATUS),
         default: session_constants_1.SESSION_STATUS.STARTED,
         index: true,
     },
@@ -89,18 +98,6 @@ const JobSessionSchema = new mongoose_1.Schema({
     startedAt: {
         type: Date,
         default: () => new Date(),
-    },
-    onTheWayAt: {
-        type: Date,
-        default: null,
-    },
-    arrivedAt: {
-        type: Date,
-        default: null,
-    },
-    workStartedAt: {
-        type: Date,
-        default: null,
     },
     completedAt: {
         type: Date,
@@ -122,14 +119,14 @@ JobSessionSchema.index({ status: 1, updatedAt: -1 });
 JobSessionSchema.index({ customerId: 1, status: 1 }, {
     unique: true,
     partialFilterExpression: {
-        status: { $in: [...session_constants_1.SESSION_ACTIVE_STATUSES] },
+        status: { $nin: [session_constants_1.SESSION_STATUS.COMPLETED, session_constants_1.SESSION_STATUS.CANCELLED] },
     },
     name: "uniq_customer_single_active_session",
 });
 JobSessionSchema.index({ supplierId: 1, status: 1 }, {
     unique: true,
     partialFilterExpression: {
-        status: { $in: [...session_constants_1.SESSION_ACTIVE_STATUSES] },
+        status: { $nin: [session_constants_1.SESSION_STATUS.COMPLETED, session_constants_1.SESSION_STATUS.CANCELLED] },
     },
     name: "uniq_supplier_single_active_session",
 });

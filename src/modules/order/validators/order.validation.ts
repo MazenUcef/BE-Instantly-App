@@ -31,6 +31,14 @@ export const validateCreateOrder: RequestHandler[] = [
     .notEmpty()
     .isIn(Object.values(ORDER_TYPE))
     .withMessage("Invalid orderType"),
+  body("selectedWorkflow")
+    .notEmpty()
+    .isString()
+    .withMessage("selectedWorkflow is required")
+    .bail()
+    .trim()
+    .isLength({ min: 2, max: 50 })
+    .withMessage("selectedWorkflow must be between 2 and 50 characters"),
   body("timeToStart")
     .optional({ nullable: true })
     .isISO8601()

@@ -1,7 +1,6 @@
 import mongoose, { Schema, Document, Types } from "mongoose";
 import {
   SESSION_STATUS,
-  SESSION_ACTIVE_STATUSES,
   SessionStatus,
   SESSION_CANCELLED_BY,
   SessionCancelledBy,
@@ -12,16 +11,15 @@ export interface IJobSession extends Document {
   offerId: Types.ObjectId;
   customerId: Types.ObjectId;
   supplierId: Types.ObjectId;
+  workflowSteps: string[];
+  stepTimestamps: Map<string, Date>;
   paymentConfirmed: boolean;
   paymentConfirmedAt?: Date | null;
-  status: SessionStatus;
+  status: string;
   cancelledBy?: SessionCancelledBy | null;
   cancellationReason?: string | null;
 
   startedAt?: Date | null;
-  onTheWayAt?: Date | null;
-  arrivedAt?: Date | null;
-  workStartedAt?: Date | null;
   completedAt?: Date | null;
   cancelledAt?: Date | null;
 
@@ -55,6 +53,16 @@ const JobSessionSchema = new Schema<IJobSession>(
       required: true,
       index: true,
     },
+    workflowSteps: {
+      type: [String],
+      required: true,
+      default: [],
+    },
+    stepTimestamps: {
+      type: Map,
+      of: Date,
+      default: {},
+    },
     paymentConfirmed: {
       type: Boolean,
       default: false,
@@ -66,7 +74,6 @@ const JobSessionSchema = new Schema<IJobSession>(
     },
     status: {
       type: String,
-      enum: Object.values(SESSION_STATUS),
       default: SESSION_STATUS.STARTED,
       index: true,
     },
@@ -84,18 +91,6 @@ const JobSessionSchema = new Schema<IJobSession>(
     startedAt: {
       type: Date,
       default: () => new Date(),
-    },
-    onTheWayAt: {
-      type: Date,
-      default: null,
-    },
-    arrivedAt: {
-      type: Date,
-      default: null,
-    },
-    workStartedAt: {
-      type: Date,
-      default: null,
     },
     completedAt: {
       type: Date,
@@ -123,7 +118,7 @@ JobSessionSchema.index(
   {
     unique: true,
     partialFilterExpression: {
-      status: { $in: [...SESSION_ACTIVE_STATUSES] },
+      status: { $nin: [SESSION_STATUS.COMPLETED, SESSION_STATUS.CANCELLED] },
     },
     name: "uniq_customer_single_active_session",
   },
@@ -134,7 +129,7 @@ JobSessionSchema.index(
   {
     unique: true,
     partialFilterExpression: {
-      status: { $in: [...SESSION_ACTIVE_STATUSES] },
+      status: { $nin: [SESSION_STATUS.COMPLETED, SESSION_STATUS.CANCELLED] },
     },
     name: "uniq_supplier_single_active_session",
   },
