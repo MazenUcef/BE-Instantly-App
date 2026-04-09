@@ -4,10 +4,6 @@ export interface TimeWindow {
   referenceId?: string;
 }
 
-/**
- * Returns the first conflicting window if newStart..newEnd overlaps any existing window,
- * otherwise returns null.
- */
 export function findTimeConflict(
   existingWindows: TimeWindow[],
   newStart: Date,

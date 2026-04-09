@@ -5,6 +5,8 @@ import UserModel from "../../auth/models/User.model";
 import OfferModel from "../../offer/models/Offer.model";
 import governmentModel from "../../government/models/Government.model";
 import categoryModel from "../../category/models/Category.model";
+import BundleBookingModel from "../../bundleBooking/models/bundleBooking.model";
+import bundleModel from "../../bundle/models/bundle.model";
 import { AppError } from "../../../shared/middlewares/errorHandler";
 import { OrderRepository } from "../repositories/order.repository";
 import { OrderEventService } from "./order-event.service";
@@ -660,31 +662,70 @@ export class OrderService {
     limit?: number;
   }) {
     const { userId, page = 1, limit = 20 } = input;
+    const skip = (page - 1) * limit;
 
-    const [orders, total] = await Promise.all([
-      OrderRepository.findCustomerTimeline(userId, page, limit),
+    const [orders, ordersTotal, bookings, bookingsTotal] = await Promise.all([
+      OrderRepository.findCustomerTimeline(userId, 1, 999),
       OrderRepository.countCustomerTimeline(userId),
+      BundleBookingModel.find({ customerId: userId })
+        .sort({ scheduledAt: 1, createdAt: -1 })
+        .lean(),
+      BundleBookingModel.countDocuments({ customerId: userId }),
     ]);
 
-    const enriched = await Promise.all(
+    const enrichedOrders = await Promise.all(
       orders.map(async (order: any) => {
         const [offer, session] = await Promise.all([
           OfferModel.findOne({ orderId: order._id, status: { $in: ["accepted", "completed", "withdrawn"] } })
-            .sort({ updatedAt: -1 }),
-          sessionModel.findOne({ orderId: order._id }),
+            .sort({ updatedAt: -1 })
+            .lean(),
+          sessionModel.findOne({ orderId: order._id }).lean(),
         ]);
-        return { ...order.toObject(), offer: offer || null, session: session || null };
+        return {
+          type: "order" as const,
+          ...order.toObject(),
+          offer: offer || null,
+          session: session || null,
+        };
       }),
     );
 
+    const enrichedBookings = await Promise.all(
+      bookings.map(async (booking: any) => {
+        const [bundle, supplier, session] = await Promise.all([
+          bundleModel.findById(booking.bundleId).lean(),
+          UserModel.findById(booking.supplierId)
+            .select("-password -refreshToken -biometrics")
+            .lean(),
+          sessionModel.findOne({ bundleBookingId: booking._id }).lean(),
+        ]);
+        return {
+          type: "bundle_booking" as const,
+          ...booking,
+          bundle: bundle || null,
+          supplier: supplier || null,
+          session: session || null,
+        };
+      }),
+    );
+
+    const merged = [...enrichedOrders, ...enrichedBookings].sort((a, b) => {
+      const dateA = a.scheduledAt ? new Date(a.scheduledAt).getTime() : new Date(a.createdAt).getTime();
+      const dateB = b.scheduledAt ? new Date(b.scheduledAt).getTime() : new Date(b.createdAt).getTime();
+      return dateA - dateB;
+    });
+
+    const total = ordersTotal + bookingsTotal;
+    const paginated = merged.slice(skip, skip + limit);
+
     return {
       success: true,
-      data: enriched,
+      data: paginated,
       meta: {
         page,
         limit,
         total,
-        count: enriched.length,
+        count: paginated.length,
         hasNextPage: page * limit < total,
       },
     };
