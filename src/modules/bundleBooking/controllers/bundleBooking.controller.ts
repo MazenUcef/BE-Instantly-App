@@ -63,6 +63,28 @@ export const rejectBundleBooking = async (req: any, res: Response) => {
   return res.status(200).json(result);
 };
 
+export const proposeTime = async (req: any, res: Response) => {
+  const result = await BundleBookingService.proposeTime({
+    bookingId: req.params.id,
+    userId: req.user.userId,
+    proposedBookedDate: req.body.proposedBookedDate,
+    proposedSlotStart: req.body.proposedSlotStart,
+    proposedSlotEnd: req.body.proposedSlotEnd,
+    proposedScheduledAt: req.body.proposedScheduledAt,
+  });
+
+  return res.status(200).json(result);
+};
+
+export const acceptProposal = async (req: any, res: Response) => {
+  const result = await BundleBookingService.acceptProposal({
+    bookingId: req.params.id,
+    userId: req.user.userId,
+  });
+
+  return res.status(200).json(result);
+};
+
 export const startBundleBooking = async (req: any, res: Response) => {
   const result = await BundleBookingService.startBundleBooking({
     bookingId: req.params.id,

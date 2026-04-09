@@ -8,7 +8,7 @@ export interface IOffer extends Document {
   orderId: Types.ObjectId;
   supplierId: Types.ObjectId;
   amount: number;
-  timeRange?: string | null;
+  estimatedDuration?: number | null;
   timeToStart?: Date | null;
   status: OfferStatus;
   expiresAt?: Date | null;
@@ -39,11 +39,10 @@ const offerSchema = new Schema<IOffer>(
       required: true,
       min: 1,
     },
-    timeRange: {
-      type: String,
+    estimatedDuration: {
+      type: Number,
       default: null,
-      trim: true,
-      maxlength: 200,
+      min: 1,
     },
     timeToStart: {
       type: Date,
@@ -116,15 +115,6 @@ offerSchema.index(
   },
 );
 
-offerSchema.index(
-  { supplierId: 1, status: 1 },
-  {
-    unique: true,
-    partialFilterExpression: {
-      status: OFFER_STATUS.ACCEPTED,
-    },
-    name: "uniq_supplier_single_active_accepted_offer",
-  },
-);
+offerSchema.index({ supplierId: 1, status: 1, timeToStart: 1 });
 
 export default mongoose.model<IOffer>("Offer", offerSchema);

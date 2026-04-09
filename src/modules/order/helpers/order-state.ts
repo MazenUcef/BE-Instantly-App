@@ -21,5 +21,5 @@ export const canCustomerUpdateOrderPrice = (status: OrderStatus) => {
 };
 
 export const canCustomerCancelOrder = (status: OrderStatus) => {
-  return ([ORDER_STATUS.PENDING, ORDER_STATUS.IN_PROGRESS] as OrderStatus[]).includes(status);
+  return ([ORDER_STATUS.PENDING, ORDER_STATUS.SCHEDULED, ORDER_STATUS.IN_PROGRESS] as OrderStatus[]).includes(status);
 };

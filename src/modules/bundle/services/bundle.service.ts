@@ -1,5 +1,6 @@
 import mongoose from "mongoose";
 import UserModel from "../../auth/models/User.model";
+import CategoryModel from "../../category/models/Category.model";
 import { AppError } from "../../../shared/middlewares/errorHandler";
 import { BundleRepository } from "../repositories/bundle.repository";
 import { buildBundlePayload } from "../../../shared/utils/helpers";
@@ -26,7 +27,12 @@ export class BundleService {
       bundleIds.map((id) => buildBundlePayload(id)),
     );
 
-    return payloads.filter(Boolean);
+    return payloads.filter(Boolean).map((payload: any) => {
+      if (payload.category) {
+        delete payload.category.jobs;
+      }
+      return payload;
+    });
   }
 
   static async createBundle(input: {
@@ -42,6 +48,7 @@ export class BundleService {
     durationMinutes: number;
     includes?: string[];
     tags?: string[];
+    selectedWorkflow: string;
   }) {
     const {
       supplierId,
@@ -56,6 +63,7 @@ export class BundleService {
       durationMinutes,
       includes,
       tags,
+      selectedWorkflow,
     } = input;
 
     const supplier = await this.getSupplierOrThrow(supplierId);
@@ -75,6 +83,16 @@ export class BundleService {
         "At least one government is required to create bundle",
         400,
       );
+    }
+
+    const category = await CategoryModel.findById(resolvedCategoryId);
+    if (!category) {
+      throw new AppError("Category not found", 404);
+    }
+
+    const workflow = category.workflows?.find((w) => w.key === selectedWorkflow);
+    if (!workflow) {
+      throw new AppError("Invalid workflow for this category", 400);
     }
 
     if (oldPrice && oldPrice < price) {
@@ -103,6 +121,7 @@ export class BundleService {
             durationMinutes,
             includes: this.normalizeStringArray(includes),
             tags: this.normalizeStringArray(tags),
+            selectedWorkflow,
             isActive: true,
           },
           dbSession,
@@ -113,6 +132,10 @@ export class BundleService {
     }
 
     const payload = await buildBundlePayload(bundle._id.toString());
+
+    if (payload?.category) {
+      delete (payload.category as any).jobs;
+    }
 
     return {
       success: true,
@@ -144,6 +167,10 @@ export class BundleService {
 
     if (!bundle) {
       throw new AppError("Bundle not found", 404);
+    }
+
+    if (bundle.category) {
+      delete (bundle.category as any).jobs;
     }
 
     return {
@@ -198,6 +225,7 @@ export class BundleService {
       "governmentIds",
       "includes",
       "tags",
+      "selectedWorkflow",
       "isActive",
     ];
 

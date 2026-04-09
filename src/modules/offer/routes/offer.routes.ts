@@ -11,6 +11,7 @@ import {
   rejectOffer,
 } from "../controllers/offer.controller";
 import {
+  validateAcceptOrderDirect,
   validateCreateOffer,
   validateOfferHistoryQuery,
   validateOfferIdParam,
@@ -71,6 +72,7 @@ router.post(
   authenticate,
   authorize("supplier"),
   validateOrderIdParam,
+  validateAcceptOrderDirect,
   acceptOrderDirect,
 );
 

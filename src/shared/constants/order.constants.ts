@@ -1,5 +1,6 @@
 export const ORDER_STATUS = {
   PENDING: "pending",
+  SCHEDULED: "scheduled",
   IN_PROGRESS: "in_progress",
   COMPLETED: "completed",
   CANCELLED: "cancelled",
@@ -26,6 +27,7 @@ export type OrderCancelledBy =
 
 export const ORDER_ACTIVE_STATUSES = [
   ORDER_STATUS.PENDING,
+  ORDER_STATUS.SCHEDULED,
   ORDER_STATUS.IN_PROGRESS,
 ] as const;
 
@@ -36,6 +38,11 @@ export const ORDER_TERMINAL_STATUSES = [
 
 export const ORDER_TRANSITIONS: Record<OrderStatus, OrderStatus[]> = {
   [ORDER_STATUS.PENDING]: [
+    ORDER_STATUS.SCHEDULED,
+    ORDER_STATUS.IN_PROGRESS,
+    ORDER_STATUS.CANCELLED,
+  ],
+  [ORDER_STATUS.SCHEDULED]: [
     ORDER_STATUS.IN_PROGRESS,
     ORDER_STATUS.CANCELLED,
   ],
@@ -50,6 +57,7 @@ export const ORDER_TRANSITIONS: Record<OrderStatus, OrderStatus[]> = {
 export const ORDER_NOTIFICATION_TYPES = {
   OFFER_REJECTED: "OFFER_REJECTED",
   ORDER_CREATED: "ORDER_CREATED",
+  ORDER_SCHEDULED: "ORDER_SCHEDULED",
   ORDER_CANCELLED: "ORDER_CANCELLED",
   REVIEW_REQUIRED: "REVIEW_REQUIRED",
 } as const;

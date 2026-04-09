@@ -5,6 +5,7 @@ export const startCall = async (req: any, res: Response) => {
   const result = await CallService.startCall({
     sessionId: req.body.sessionId,
     callerId: req.user.userId,
+    type: req.body.type || "audio",
   });
 
   return res.status(201).json(result);

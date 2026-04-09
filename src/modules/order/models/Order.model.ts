@@ -25,6 +25,10 @@ export interface IOrder extends Document {
   customerReviewed: boolean;
   supplierReviewed: boolean;
   timeToStart?: Date | null;
+  scheduledAt?: Date | null;
+  estimatedDuration?: number | null;
+  images?: { url: string; publicId: string }[];
+  files?: { url: string; publicId: string; originalName: string }[];
   cancelledBy?: OrderCancelledBy | null;
   cancellationReason?: string | null;
   cancelledAt?: Date | null;
@@ -103,6 +107,16 @@ const orderSchema = new Schema<IOrder>(
       type: Date,
       default: null,
     },
+    scheduledAt: {
+      type: Date,
+      default: null,
+      index: true,
+    },
+    estimatedDuration: {
+      type: Number,
+      default: null,
+      min: 1,
+    },
     status: {
       type: String,
       enum: Object.values(ORDER_STATUS),
@@ -123,6 +137,25 @@ const orderSchema = new Schema<IOrder>(
       type: Boolean,
       default: false,
       index: true,
+    },
+    images: {
+      type: [
+        {
+          url: { type: String, required: true },
+          publicId: { type: String, required: true },
+        },
+      ],
+      default: [],
+    },
+    files: {
+      type: [
+        {
+          url: { type: String, required: true },
+          publicId: { type: String, required: true },
+          originalName: { type: String, required: true },
+        },
+      ],
+      default: [],
     },
     cancelledBy: {
       type: String,
@@ -164,9 +197,9 @@ orderSchema.index(
   {
     unique: true,
     partialFilterExpression: {
-      status: { $in: [ORDER_STATUS.PENDING, ORDER_STATUS.IN_PROGRESS] },
+      status: ORDER_STATUS.PENDING,
     },
-    name: "uniq_customer_single_active_order",
+    name: "uniq_customer_single_pending_order",
   },
 );
 

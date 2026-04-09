@@ -77,8 +77,9 @@ export class CallService {
   static async startCall(input: {
     sessionId: string;
     callerId: string;
+    type?: "audio" | "video";
   }) {
-    const { sessionId, callerId } = input;
+    const { sessionId, callerId, type = CALL_TYPE.AUDIO } = input;
 
     const sessionDoc = await this.validateSessionAccess(sessionId, callerId);
 
@@ -111,7 +112,7 @@ export class CallService {
             sessionId,
             callerId,
             receiverId,
-            type: CALL_TYPE.AUDIO,
+            type,
             status: CALL_STATUS.RINGING,
             startedAt: new Date(),
           },

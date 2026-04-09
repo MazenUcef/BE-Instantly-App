@@ -15,6 +15,7 @@ export const createBundle = async (req: any, res: Response) => {
     durationMinutes: Number(req.body.durationMinutes),
     includes: req.body.includes,
     tags: req.body.tags,
+    selectedWorkflow: req.body.selectedWorkflow,
   });
 
   return res.status(201).json(result);

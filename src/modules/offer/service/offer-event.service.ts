@@ -96,7 +96,7 @@ export class OfferEventService {
     offerId: string;
     supplierId: string;
     amount: number;
-    timeRange?: string | null;
+    estimatedDuration?: number | null;
     timeToStart?: Date | string | null;
   }) {
     await publishNotification({
@@ -109,7 +109,7 @@ export class OfferEventService {
         orderId: input.orderId,
         supplierId: input.supplierId,
         amount: input.amount,
-        timeRange: input.timeRange ?? null,
+        estimatedDuration: input.estimatedDuration ?? null,
         timeToStart: input.timeToStart ?? null,
       },
     });

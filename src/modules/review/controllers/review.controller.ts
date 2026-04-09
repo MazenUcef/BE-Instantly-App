@@ -5,6 +5,7 @@ export const createReview = async (req: any, res: Response) => {
   const result = await ReviewService.createReview({
     actorUserId: req.user.userId,
     orderId: req.body.orderId,
+    bundleBookingId: req.body.bundleBookingId,
     rating: req.body.rating,
     comment: req.body.comment,
     role: req.body.role,

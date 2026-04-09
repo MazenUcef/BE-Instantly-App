@@ -1,5 +1,6 @@
 export const CALL_TYPE = {
   AUDIO: "audio",
+  VIDEO: "video",
 } as const;
 
 export const CALL_STATUS = {

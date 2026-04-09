@@ -83,6 +83,7 @@ export const socketEvents = {
   ACCEPTED: "bundle_booking:accepted",
   REJECTED: "bundle_booking:rejected",
   CANCELLED: "bundle_booking:cancelled",
+  TIME_PROPOSED: "bundle_booking:time_proposed",
 };
 
 const ACTIVE_CALL_STATUSES = ["initiated", "ringing", "accepted"];

@@ -70,6 +70,27 @@ export const validateRejectBooking: RequestHandler[] = [
   handleValidationErrors,
 ];
 
+export const validateProposeTime: RequestHandler[] = [
+  param("id").isMongoId().withMessage("Invalid booking id"),
+  body("proposedBookedDate")
+    .notEmpty()
+    .isISO8601()
+    .withMessage("proposedBookedDate must be valid"),
+  body("proposedSlotStart")
+    .notEmpty()
+    .matches(TIME_REGEX)
+    .withMessage("proposedSlotStart must be HH:mm"),
+  body("proposedSlotEnd")
+    .notEmpty()
+    .matches(TIME_REGEX)
+    .withMessage("proposedSlotEnd must be HH:mm"),
+  body("proposedScheduledAt")
+    .notEmpty()
+    .isISO8601()
+    .withMessage("proposedScheduledAt must be valid"),
+  handleValidationErrors,
+];
+
 export const validateBookingStatusQuery: RequestHandler[] = [
   query("status").optional().isString().trim(),
   handleValidationErrors,

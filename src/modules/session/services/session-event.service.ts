@@ -8,6 +8,26 @@ import { publishNotification } from "../../notification/notification.publisher";
 
 type ActorRole = "customer" | "supplier" | "system" | "admin";
 
+const getSessionRef = (session: any) => {
+  if (session.orderId) return `order #${session.orderId}`;
+  if (session.bundleBookingId) return `booking #${session.bundleBookingId}`;
+  return "session";
+};
+
+const getSessionData = (session: any) => {
+  const data: Record<string, any> = {
+    sessionId: session._id.toString(),
+  };
+  if (session.orderId) {
+    data.orderId = session.orderId.toString();
+    data.offerId = session.offerId?.toString() || null;
+  }
+  if (session.bundleBookingId) {
+    data.bundleBookingId = session.bundleBookingId.toString();
+  }
+  return data;
+};
+
 export class SessionEventService {
   static emitSessionToParticipants(
     eventName: string,
@@ -33,10 +53,6 @@ export class SessionEventService {
     );
   }
 
-  /**
-   * Emit SESSION_CANCELLED with a standard envelope including meta fields.
-   * Use this instead of emitSessionToParticipants for cancellation events.
-   */
   static emitSessionCancelled(
     session: any,
     meta: {
@@ -74,46 +90,37 @@ export class SessionEventService {
   }
 
   static async notifySessionCreated(session: any) {
+    const ref = getSessionRef(session);
+    const data = getSessionData(session);
+
     await Promise.all([
       publishNotification({
         userId: session.customerId.toString(),
         type: SESSION_NOTIFICATION_TYPES.SESSION_CREATED,
         title: "New Job Started",
-        message: `A new job has started for order #${session.orderId}.`,
-        data: {
-          sessionId: session._id.toString(),
-          orderId: session.orderId.toString(),
-          offerId: session.offerId.toString(),
-          supplierId: session.supplierId.toString(),
-        },
+        message: `A new job has started for ${ref}.`,
+        data: { ...data, supplierId: session.supplierId.toString() },
       }),
       publishNotification({
         userId: session.supplierId.toString(),
         type: SESSION_NOTIFICATION_TYPES.SESSION_CREATED,
         title: "New Job Assigned",
-        message: `You have been assigned a job for order #${session.orderId}.`,
-        data: {
-          sessionId: session._id.toString(),
-          orderId: session.orderId.toString(),
-          offerId: session.offerId.toString(),
-          customerId: session.customerId.toString(),
-        },
+        message: `You have been assigned a job for ${ref}.`,
+        data: { ...data, customerId: session.customerId.toString() },
       }),
     ]);
   }
 
   static async notifySessionStatusUpdated(session: any, status: string) {
+    const ref = getSessionRef(session);
+    const data = getSessionData(session);
+
     await publishNotification({
       userId: session.customerId.toString(),
       type: SESSION_NOTIFICATION_TYPES.SUPPLIER_STATUS_UPDATE,
       title: "Supplier Status Update",
-      message: `Your supplier updated the session to "${status}" for order #${session.orderId}.`,
-      data: {
-        sessionId: session._id.toString(),
-        orderId: session.orderId.toString(),
-        supplierId: session.supplierId.toString(),
-        status,
-      },
+      message: `Your supplier updated the session to "${status}" for ${ref}.`,
+      data: { ...data, supplierId: session.supplierId.toString(), status },
     });
   }
 
@@ -121,6 +128,9 @@ export class SessionEventService {
     session: any,
     cancelledBy: "customer" | "supplier",
   ) {
+    const ref = getSessionRef(session);
+    const data = getSessionData(session);
+
     await Promise.all([
       publishNotification({
         userId: session.customerId.toString(),
@@ -128,13 +138,9 @@ export class SessionEventService {
         title: "Session Cancelled",
         message:
           cancelledBy === "customer"
-            ? `You cancelled the job for order #${session.orderId}.`
-            : `The supplier cancelled the job for order #${session.orderId}. Your order is available again.`,
-        data: {
-          sessionId: session._id.toString(),
-          orderId: session.orderId.toString(),
-          cancelledBy,
-        },
+            ? `You cancelled the job for ${ref}.`
+            : `The supplier cancelled the job for ${ref}.`,
+        data: { ...data, cancelledBy },
       }),
       publishNotification({
         userId: session.supplierId.toString(),
@@ -142,63 +148,53 @@ export class SessionEventService {
         title: "Session Cancelled",
         message:
           cancelledBy === "customer"
-            ? `The customer cancelled the job for order #${session.orderId}.`
-            : `You cancelled the job for order #${session.orderId}.`,
-        data: {
-          sessionId: session._id.toString(),
-          orderId: session.orderId.toString(),
-          cancelledBy,
-        },
+            ? `The customer cancelled the job for ${ref}.`
+            : `You cancelled the job for ${ref}.`,
+        data: { ...data, cancelledBy },
       }),
     ]);
   }
 
   static async notifySessionCompleted(session: any) {
+    const ref = getSessionRef(session);
+    const data = getSessionData(session);
+
     await Promise.all([
       publishNotification({
         userId: session.customerId.toString(),
         type: SESSION_NOTIFICATION_TYPES.SESSION_COMPLETED,
         title: "Job Completed",
-        message: `Your job for order #${session.orderId} has been completed.`,
-        data: {
-          sessionId: session._id.toString(),
-          orderId: session.orderId.toString(),
-        },
+        message: `Your job for ${ref} has been completed.`,
+        data,
       }),
       publishNotification({
         userId: session.supplierId.toString(),
         type: SESSION_NOTIFICATION_TYPES.SESSION_COMPLETED,
         title: "Job Completed",
-        message: `You completed the job for order #${session.orderId}.`,
-        data: {
-          sessionId: session._id.toString(),
-          orderId: session.orderId.toString(),
-        },
+        message: `You completed the job for ${ref}.`,
+        data,
       }),
     ]);
   }
 
   static async notifyPaymentConfirmed(session: any) {
+    const ref = getSessionRef(session);
+    const data = getSessionData(session);
+
     await Promise.all([
       publishNotification({
         userId: session.customerId.toString(),
         type: SESSION_NOTIFICATION_TYPES.SESSION_PAYMENT_CONFIRMED,
         title: "Payment Confirmed",
-        message: `Payment was confirmed for order #${session.orderId}.`,
-        data: {
-          sessionId: session._id.toString(),
-          orderId: session.orderId.toString(),
-        },
+        message: `Payment was confirmed for ${ref}.`,
+        data,
       }),
       publishNotification({
         userId: session.supplierId.toString(),
         type: SESSION_NOTIFICATION_TYPES.SESSION_PAYMENT_CONFIRMED,
         title: "Payment Confirmed",
-        message: `Payment was confirmed for order #${session.orderId}.`,
-        data: {
-          sessionId: session._id.toString(),
-          orderId: session.orderId.toString(),
-        },
+        message: `Payment was confirmed for ${ref}.`,
+        data,
       }),
     ]);
   }

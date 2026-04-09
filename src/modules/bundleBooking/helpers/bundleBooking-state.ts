@@ -28,22 +28,9 @@ export const canCancelBooking = (status: BundleBookingStatus) => {
   return !isBookingTerminal(status);
 };
 
-export const canSupplierAcceptBooking = (status: BundleBookingStatus) => {
-  return status === BUNDLE_BOOKING_STATUS.PENDING_SUPPLIER_APPROVAL;
-};
-
-export const canSupplierRejectBooking = (status: BundleBookingStatus) => {
-  return status === BUNDLE_BOOKING_STATUS.PENDING_SUPPLIER_APPROVAL;
-};
-
-export const canSupplierStartBooking = (status: BundleBookingStatus) => {
-  return status === BUNDLE_BOOKING_STATUS.ACCEPTED;
-};
-
-export const canSupplierMarkDone = (status: BundleBookingStatus) => {
-  return status === BUNDLE_BOOKING_STATUS.IN_PROGRESS;
-};
-
-export const canConfirmBookingPayment = (status: BundleBookingStatus) => {
-  return status === BUNDLE_BOOKING_STATUS.DONE;
+export const isNegotiationStatus = (status: BundleBookingStatus) => {
+  return (
+    status === BUNDLE_BOOKING_STATUS.PENDING_SUPPLIER_APPROVAL ||
+    status === BUNDLE_BOOKING_STATUS.PENDING_CUSTOMER_APPROVAL
+  );
 };

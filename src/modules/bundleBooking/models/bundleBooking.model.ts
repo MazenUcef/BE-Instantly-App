@@ -23,8 +23,15 @@ export interface IBundleBooking extends Document {
   paymentConfirmed: boolean;
   paymentConfirmedAt?: Date | null;
   finalPrice: number;
+  selectedWorkflow?: string | null;
+  customerReviewed: boolean;
+  supplierReviewed: boolean;
   rejectionReason?: string | null;
   cancelledBy?: BundleBookingCancelledBy | null;
+  proposedBookedDate?: string | null;
+  proposedSlotStart?: string | null;
+  proposedSlotEnd?: string | null;
+  proposedScheduledAt?: Date | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -111,6 +118,19 @@ const BundleBookingSchema = new Schema<IBundleBooking>(
       required: true,
       min: 1,
     },
+    selectedWorkflow: {
+      type: String,
+      default: null,
+      trim: true,
+    },
+    customerReviewed: {
+      type: Boolean,
+      default: false,
+    },
+    supplierReviewed: {
+      type: Boolean,
+      default: false,
+    },
     rejectionReason: {
       type: String,
       default: null,
@@ -120,6 +140,22 @@ const BundleBookingSchema = new Schema<IBundleBooking>(
     cancelledBy: {
       type: String,
       enum: [...Object.values(BUNDLE_BOOKING_CANCELLED_BY), null],
+      default: null,
+    },
+    proposedBookedDate: {
+      type: String,
+      default: null,
+    },
+    proposedSlotStart: {
+      type: String,
+      default: null,
+    },
+    proposedSlotEnd: {
+      type: String,
+      default: null,
+    },
+    proposedScheduledAt: {
+      type: Date,
       default: null,
     },
   },
@@ -139,6 +175,12 @@ BundleBookingSchema.index({
   slotEnd: 1,
 });
 BundleBookingSchema.index({ customerId: 1, createdAt: -1 });
+BundleBookingSchema.index({
+  customerId: 1,
+  bookedDate: 1,
+  slotStart: 1,
+  slotEnd: 1,
+});
 
 export default mongoose.model<IBundleBooking>(
   "BundleBooking",

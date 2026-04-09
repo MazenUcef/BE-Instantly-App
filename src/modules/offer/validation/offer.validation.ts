@@ -28,15 +28,26 @@ export const validateCreateOffer: RequestHandler[] = [
     .notEmpty()
     .isFloat({ min: 1 })
     .withMessage("amount must be >= 1"),
-  body("timeRange")
+  body("estimatedDuration")
     .optional({ nullable: true })
-    .isString()
-    .trim()
-    .isLength({ min: 1, max: 200 }),
+    .isInt({ min: 1, max: 1440 })
+    .withMessage("estimatedDuration must be an integer between 1 and 1440 minutes"),
   body("timeToStart")
     .optional({ nullable: true })
     .isISO8601()
     .withMessage("timeToStart must be a valid ISO date"),
+  handleValidationErrors,
+];
+
+export const validateAcceptOrderDirect: RequestHandler[] = [
+  body("timeToStart")
+    .optional({ nullable: true })
+    .isISO8601()
+    .withMessage("timeToStart must be a valid ISO date"),
+  body("estimatedDuration")
+    .optional({ nullable: true })
+    .isInt({ min: 1, max: 1440 })
+    .withMessage("estimatedDuration must be between 1 and 1440 minutes"),
   handleValidationErrors,
 ];
 

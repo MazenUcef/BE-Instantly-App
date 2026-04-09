@@ -18,6 +18,7 @@ export interface IBundle extends Document {
   durationMinutes: number;
   includes: string[];
   tags: string[];
+  selectedWorkflow?: string | null;
   isActive: boolean;
   createdAt: Date;
   updatedAt: Date;
@@ -90,6 +91,11 @@ const BundleSchema = new Schema<IBundle>(
     tags: {
       type: [String],
       default: [],
+    },
+    selectedWorkflow: {
+      type: String,
+      default: null,
+      trim: true,
     },
     isActive: {
       type: Boolean,

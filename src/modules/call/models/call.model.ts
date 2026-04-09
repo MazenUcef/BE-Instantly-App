@@ -6,7 +6,7 @@ export interface ICallSession extends Document {
   sessionId: Types.ObjectId;
   callerId: Types.ObjectId;
   receiverId: Types.ObjectId;
-  type: "audio";
+  type: "audio" | "video";
   status:
     | "initiated"
     | "ringing"

@@ -5,8 +5,9 @@ import { SESSION_STATUS } from "../../../shared/constants/session.constants";
 export class SessionRepository {
   static createSession(
     data: {
-      orderId: Types.ObjectId | string;
-      offerId: Types.ObjectId | string;
+      orderId?: Types.ObjectId | string | null;
+      offerId?: Types.ObjectId | string | null;
+      bundleBookingId?: Types.ObjectId | string | null;
       customerId: Types.ObjectId | string;
       supplierId: Types.ObjectId | string;
       workflowSteps: string[];
@@ -34,6 +35,13 @@ export class SessionRepository {
     session?: ClientSession,
   ) {
     return SessionModel.findOne({ offerId }).session(session || null);
+  }
+
+  static findByBundleBookingId(
+    bundleBookingId: Types.ObjectId | string,
+    session?: ClientSession,
+  ) {
+    return SessionModel.findOne({ bundleBookingId }).session(session || null);
   }
 
   static findActiveByUser(

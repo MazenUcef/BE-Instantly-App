@@ -24,6 +24,10 @@ export const validateStartCall: RequestHandler[] = [
     .notEmpty()
     .isMongoId()
     .withMessage("Valid sessionId is required"),
+  body("type")
+    .optional()
+    .isIn(["audio", "video"])
+    .withMessage("type must be 'audio' or 'video'"),
   handleValidationErrors,
 ];
 

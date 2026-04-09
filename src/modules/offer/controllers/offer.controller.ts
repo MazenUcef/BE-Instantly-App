@@ -6,7 +6,7 @@ export const createOffer = async (req: any, res: Response) => {
     supplierId: req.user.userId,
     orderId: req.body.orderId,
     amount: Number(req.body.amount),
-    timeRange: req.body.timeRange,
+    estimatedDuration: req.body.estimatedDuration ? Number(req.body.estimatedDuration) : null,
     timeToStart: req.body.timeToStart,
   });
 
@@ -54,6 +54,8 @@ export const acceptOrderDirect = async (req: any, res: Response) => {
   const result = await OfferService.acceptOrderDirect({
     orderId: req.params.orderId,
     supplierId: req.user.userId,
+    timeToStart: req.body.timeToStart,
+    estimatedDuration: req.body.estimatedDuration ? Number(req.body.estimatedDuration) : null,
   });
 
   return res.status(200).json(result);

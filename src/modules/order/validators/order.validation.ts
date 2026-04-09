@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction, RequestHandler } from "express";
 import { body, param, query, validationResult } from "express-validator";
 import { ORDER_TYPE } from "../../../shared/constants/order.constants";
+import { uploadWithFiles } from "../../../shared/config/multer";
 
 const handleValidationErrors = (
   req: Request,
@@ -21,6 +22,10 @@ const handleValidationErrors = (
 };
 
 export const validateCreateOrder: RequestHandler[] = [
+  uploadWithFiles.fields([
+    { name: "images", maxCount: 5 },
+    { name: "files", maxCount: 3 },
+  ]),
   body("address").notEmpty().isString().trim().isLength({ min: 3, max: 500 }),
   body("description").notEmpty().isString().trim().isLength({ min: 3, max: 5000 }),
   body("categoryId").notEmpty().isMongoId().withMessage("Valid categoryId is required"),

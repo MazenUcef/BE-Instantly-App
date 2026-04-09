@@ -7,6 +7,8 @@ import {
   getBookingById,
   acceptBundleBooking,
   rejectBundleBooking,
+  proposeTime,
+  acceptProposal,
   startBundleBooking,
   markBundleBookingDone,
   confirmBundlePayment,
@@ -17,6 +19,7 @@ import {
   validateBookingStatusQuery,
   validateCreateBundleBooking,
   validateRejectBooking,
+  validateProposeTime,
 } from "../validators/bundleBooking.validation";
 
 const router = Router();
@@ -47,6 +50,7 @@ router.get(
 
 router.get("/:id", authenticate, validateBookingIdParam, getBookingById);
 
+// Supplier accepts the customer's requested time
 router.patch(
   "/:id/accept",
   authenticate,
@@ -55,12 +59,29 @@ router.patch(
   acceptBundleBooking,
 );
 
+// Supplier rejects the booking entirely
 router.patch(
   "/:id/reject",
   authenticate,
   authorize("supplier"),
   validateRejectBooking,
   rejectBundleBooking,
+);
+
+// Either party proposes a different time (negotiation)
+router.patch(
+  "/:id/propose-time",
+  authenticate,
+  validateProposeTime,
+  proposeTime,
+);
+
+// Either party accepts the other's proposed time
+router.patch(
+  "/:id/accept-proposal",
+  authenticate,
+  validateBookingIdParam,
+  acceptProposal,
 );
 
 router.patch(

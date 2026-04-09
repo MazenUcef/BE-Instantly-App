@@ -7,8 +7,9 @@ import {
 } from "../../../shared/constants/session.constants";
 
 export interface IJobSession extends Document {
-  orderId: Types.ObjectId;
-  offerId: Types.ObjectId;
+  orderId?: Types.ObjectId | null;
+  offerId?: Types.ObjectId | null;
+  bundleBookingId?: Types.ObjectId | null;
   customerId: Types.ObjectId;
   supplierId: Types.ObjectId;
   workflowSteps: string[];
@@ -32,13 +33,19 @@ const JobSessionSchema = new Schema<IJobSession>(
     orderId: {
       type: Schema.Types.ObjectId,
       ref: "Order",
-      required: true,
+      default: null,
       index: true,
     },
     offerId: {
       type: Schema.Types.ObjectId,
       ref: "Offer",
-      required: true,
+      default: null,
+      index: true,
+    },
+    bundleBookingId: {
+      type: Schema.Types.ObjectId,
+      ref: "BundleBooking",
+      default: null,
       index: true,
     },
     customerId: {
@@ -107,8 +114,39 @@ const JobSessionSchema = new Schema<IJobSession>(
   },
 );
 
-JobSessionSchema.index({ orderId: 1 }, { unique: true });
-JobSessionSchema.index({ offerId: 1 }, { unique: true });
+JobSessionSchema.index(
+  { orderId: 1 },
+  {
+    unique: true,
+    partialFilterExpression: {
+      orderId: { $type: "objectId" },
+      status: { $nin: [SESSION_STATUS.COMPLETED, SESSION_STATUS.CANCELLED] },
+    },
+    name: "uniq_active_orderId",
+  },
+);
+JobSessionSchema.index(
+  { offerId: 1 },
+  {
+    unique: true,
+    partialFilterExpression: {
+      offerId: { $type: "objectId" },
+      status: { $nin: [SESSION_STATUS.COMPLETED, SESSION_STATUS.CANCELLED] },
+    },
+    name: "uniq_active_offerId",
+  },
+);
+JobSessionSchema.index(
+  { bundleBookingId: 1 },
+  {
+    unique: true,
+    partialFilterExpression: {
+      bundleBookingId: { $type: "objectId" },
+      status: { $nin: [SESSION_STATUS.COMPLETED, SESSION_STATUS.CANCELLED] },
+    },
+    name: "uniq_active_bundleBookingId",
+  },
+);
 JobSessionSchema.index({ customerId: 1, status: 1, updatedAt: -1 });
 JobSessionSchema.index({ supplierId: 1, status: 1, updatedAt: -1 });
 JobSessionSchema.index({ status: 1, updatedAt: -1 });

@@ -59,6 +59,14 @@ export const validateCreateBundle: RequestHandler[] = [
     .isInt()
     .custom((value) => BUNDLE_ALLOWED_DURATIONS.includes(Number(value) as any))
     .withMessage("Invalid durationMinutes"),
+  body("selectedWorkflow")
+    .notEmpty()
+    .withMessage("selectedWorkflow is required")
+    .bail()
+    .isString()
+    .trim()
+    .isLength({ min: 2, max: 50 })
+    .withMessage("selectedWorkflow must be between 2 and 50 characters"),
   body("includes").optional().isArray(),
   body("includes.*")
     .optional()
@@ -98,6 +106,11 @@ export const validateUpdateBundle: RequestHandler[] = [
     .isInt()
     .custom((value) => BUNDLE_ALLOWED_DURATIONS.includes(Number(value) as any))
     .withMessage("Invalid durationMinutes"),
+  body("selectedWorkflow")
+    .optional({ nullable: true })
+    .isString()
+    .trim()
+    .isLength({ min: 2, max: 50 }),
   body("includes").optional().isArray(),
   body("includes.*")
     .optional()

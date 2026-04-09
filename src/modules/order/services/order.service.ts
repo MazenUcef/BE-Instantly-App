@@ -25,6 +25,7 @@ import {
   assertValidOrderTransition,
   canCustomerCancelOrder,
 } from "../helpers/order-state";
+import { uploadFileToCloudinary } from "../../../shared/utils/cloudinary";
 
 export class OrderService {
   private static async validateOrderDependencies(input: {
@@ -75,14 +76,22 @@ export class OrderService {
     customerId: string,
     dbSession?: any,
   ) {
-    const [existingActiveOrder, unfinishedReview] = await Promise.all([
-      OrderRepository.findCustomerActiveOrder(customerId, dbSession),
+    const [inProgressOrder, pendingOrder, unfinishedReview] = await Promise.all([
+      OrderRepository.findCustomerInProgressOrder(customerId, dbSession),
+      OrderRepository.findCustomerPendingOrder(customerId, dbSession),
       OrderRepository.findCustomerPendingReviewOrder(customerId, dbSession),
     ]);
 
-    if (existingActiveOrder) {
+    if (inProgressOrder) {
       throw new AppError(
-        "You already have an active order. Please complete it before creating a new one.",
+        "You have an active job session in progress. Complete it before creating a new order.",
+        400,
+      );
+    }
+
+    if (pendingOrder) {
+      throw new AppError(
+        "You already have a pending order waiting for offers.",
         400,
       );
     }
@@ -110,6 +119,8 @@ export class OrderService {
     jobTitle: string;
     orderType: "contract" | "daily";
     selectedWorkflow: string;
+    imageFiles?: Express.Multer.File[];
+    docFiles?: Express.Multer.File[];
   }) {
     const {
       customerId,
@@ -123,7 +134,30 @@ export class OrderService {
       jobTitle,
       orderType,
       selectedWorkflow,
+      imageFiles = [],
+      docFiles = [],
     } = input;
+
+    // Upload files to Cloudinary before the transaction
+    const [uploadedImages, uploadedFiles] = await Promise.all([
+      Promise.all(
+        imageFiles.map((file) => uploadFileToCloudinary(file, "orders/images")),
+      ),
+      Promise.all(
+        docFiles.map((file) => uploadFileToCloudinary(file, "orders/files")),
+      ),
+    ]);
+
+    const images = uploadedImages.map((r) => ({
+      url: r.secure_url,
+      publicId: r.public_id,
+    }));
+
+    const files = uploadedFiles.map((r, i) => ({
+      url: r.secure_url,
+      publicId: r.public_id,
+      originalName: docFiles[i].originalname,
+    }));
 
     const dbSession = await mongoose.startSession();
     let order: any;
@@ -156,6 +190,8 @@ export class OrderService {
             timeToStart: timeToStart || null,
             orderType,
             selectedWorkflow,
+            images,
+            files,
             status: ORDER_STATUS.PENDING,
           },
           dbSession,
@@ -237,7 +273,7 @@ export class OrderService {
     let activeSession: any = null;
     let acceptedOffer: any = null;
     let pendingOffers: any[] = [];
-    let flowType: "pending_cancel" | "cancel_active_session_and_order" | null =
+    let flowType: "pending_cancel" | "scheduled_cancel" | "cancel_active_session_and_order" | null =
       null;
 
     try {
@@ -254,7 +290,7 @@ export class OrderService {
 
         if (!canCustomerCancelOrder(order.status)) {
           throw new AppError(
-            "Only pending or in-progress orders can be cancelled by customer",
+            "Only pending, scheduled, or in-progress orders can be cancelled",
             400,
           );
         }
@@ -336,7 +372,9 @@ export class OrderService {
         flowType =
           order.status === ORDER_STATUS.IN_PROGRESS
             ? "cancel_active_session_and_order"
-            : "pending_cancel";
+            : order.status === ORDER_STATUS.SCHEDULED
+              ? "scheduled_cancel"
+              : "pending_cancel";
       });
     } finally {
       await dbSession.endSession();
@@ -399,7 +437,9 @@ export class OrderService {
       message:
         flowType === "cancel_active_session_and_order"
           ? "Order cancelled and active session cancelled successfully"
-          : "Order cancelled successfully",
+          : flowType === "scheduled_cancel"
+            ? "Scheduled order cancelled successfully"
+            : "Order cancelled successfully",
       data: {
         orderId: cancelledOrder._id.toString(),
         orderStatus: cancelledOrder.status,
@@ -429,14 +469,16 @@ export class OrderService {
       };
     }
 
-    const activeAcceptedOffer = await OfferModel.findOne({
+    // Only block the supplier feed if the supplier has an active IN_PROGRESS session
+    // SCHEDULED bookings do not block — supplier can still browse & take more orders
+    const activeSession = await sessionModel.findOne({
       supplierId,
-      status: "accepted",
-    }).sort({ createdAt: -1 });
+      status: { $nin: [SESSION_STATUS.COMPLETED, SESSION_STATUS.CANCELLED] },
+    });
 
-    if (activeAcceptedOffer) {
+    if (activeSession && activeSession.orderId) {
       const activeOrder = await buildSupplierOrderPayload(
-        activeAcceptedOffer.orderId.toString(),
+        activeSession.orderId.toString(),
       );
 
       if (!activeOrder) {
@@ -608,6 +650,43 @@ export class OrderService {
       success: true,
       hasPendingOrders: false,
       message: "No pending orders found",
+    };
+  }
+
+  static async getTimeline(input: {
+    userId: string;
+    role: string;
+    page?: number;
+    limit?: number;
+  }) {
+    const { userId, page = 1, limit = 20 } = input;
+
+    const [orders, total] = await Promise.all([
+      OrderRepository.findCustomerTimeline(userId, page, limit),
+      OrderRepository.countCustomerTimeline(userId),
+    ]);
+
+    const enriched = await Promise.all(
+      orders.map(async (order: any) => {
+        const [offer, session] = await Promise.all([
+          OfferModel.findOne({ orderId: order._id, status: { $in: ["accepted", "completed", "withdrawn"] } })
+            .sort({ updatedAt: -1 }),
+          sessionModel.findOne({ orderId: order._id }),
+        ]);
+        return { ...order.toObject(), offer: offer || null, session: session || null };
+      }),
+    );
+
+    return {
+      success: true,
+      data: enriched,
+      meta: {
+        page,
+        limit,
+        total,
+        count: enriched.length,
+        hasNextPage: page * limit < total,
+      },
     };
   }
 }

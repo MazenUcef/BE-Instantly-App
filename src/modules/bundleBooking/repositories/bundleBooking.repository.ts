@@ -17,6 +17,7 @@ export class BundleBookingRepository {
       scheduledAt: Date | string;
       status?: string;
       paymentConfirmed?: boolean;
+      selectedWorkflow?: string | null;
       finalPrice: number;
       rejectionReason?: string | null;
     },
@@ -80,6 +81,37 @@ export class BundleBookingRepository {
       bookedDate: input.bookedDate,
       status: { $in: [...input.statuses] },
     });
+  }
+
+  static findOverlappingCustomerBookings(input: {
+    customerId: Types.ObjectId | string;
+    bookedDate: string;
+    statuses: readonly string[];
+  }) {
+    return BundleBookingModel.find({
+      customerId: input.customerId,
+      bookedDate: input.bookedDate,
+      status: { $in: [...input.statuses] },
+    });
+  }
+
+  static findDueAcceptedBookings(session?: ClientSession) {
+    return BundleBookingModel.find({
+      status: "accepted",
+      scheduledAt: { $lte: new Date() },
+      selectedWorkflow: { $ne: null },
+    }).session(session || null);
+  }
+
+  static markInProgress(
+    bookingId: Types.ObjectId | string,
+    session?: ClientSession,
+  ) {
+    return BundleBookingModel.findOneAndUpdate(
+      { _id: bookingId, status: "accepted" },
+      { $set: { status: "in_progress" } },
+      { new: true, session },
+    );
   }
 
   static updateBooking(

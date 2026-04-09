@@ -136,15 +136,17 @@ export class CallEventService {
   }
 
   static async notifyIncoming(call: any) {
+    const callType = call.type === "video" ? "video" : "audio";
     await publishNotification({
       userId: String(call.receiverId),
       type: CALL_NOTIFICATION_TYPES.INCOMING_CALL,
-      title: "Incoming call",
-      message: "You have an incoming call in an active job session.",
+      title: `Incoming ${callType} call`,
+      message: `You have an incoming ${callType} call in an active session.`,
       data: {
         callId: String(call._id),
         sessionId: String(call.sessionId),
         callerId: String(call.callerId),
+        callType,
       },
     });
   }

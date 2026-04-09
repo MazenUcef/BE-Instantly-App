@@ -6,6 +6,7 @@ import {
   updateSessionStatus,
   completeSession,
   getSessionByOrder,
+  getSessionByBundleBooking,
   confirmSessionPayment,
   getResumeSessionForUser,
 } from "../controllers/session.controller";
@@ -52,6 +53,12 @@ router.get(
   authenticate,
   validateOrderIdParam,
   getSessionByOrder,
+);
+
+router.get(
+  "/by-booking/:bundleBookingId",
+  authenticate,
+  getSessionByBundleBooking,
 );
 
 router.get(

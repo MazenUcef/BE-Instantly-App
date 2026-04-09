@@ -18,18 +18,15 @@ import {
 import { ORDER_STATUS, ORDER_CANCELLED_BY } from "../../../shared/constants/order.constants";
 import { OFFER_STATUS } from "../../../shared/constants/offer.constants";
 import { assertValidSessionTransition, canCancelSession, canCompleteSession, canConfirmSessionPayment, isSessionTerminal } from "../helper/session-state";
+import BundleBookingModel from "../../bundleBooking/models/bundleBooking.model";
+import BundleModel from "../../bundle/models/bundle.model";
 
 const populateSessionData = async (session: any) => {
   if (!session) return null;
 
   const sessionObj = session.toObject ? session.toObject() : session;
 
-  const [order, offer, customer, supplier] = await Promise.all([
-    Order.findById(session.orderId)
-      .populate("categoryId", "name icon")
-      .populate("governmentId", "name nameAr")
-      .lean(),
-    Offer.findById(session.offerId).lean(),
+  const [customer, supplier] = await Promise.all([
     UserModel.findById(session.customerId)
       .select("-password -refreshToken -biometrics")
       .lean(),
@@ -38,10 +35,40 @@ const populateSessionData = async (session: any) => {
       .lean(),
   ]);
 
+  if (session.bundleBookingId) {
+    const bundleBooking = await BundleBookingModel.findById(session.bundleBookingId)
+      .populate("categoryId", "name icon")
+      .populate("governmentId", "name nameAr")
+      .lean();
+    const bundle = bundleBooking ? await BundleModel.findById(bundleBooking.bundleId).lean() : null;
+
+    return {
+      ...sessionObj,
+      bundleBooking: bundleBooking || null,
+      bundle: bundle || null,
+      order: null,
+      offer: null,
+      customer: customer || null,
+      supplier: supplier || null,
+    };
+  }
+
+  const [order, offer] = await Promise.all([
+    session.orderId
+      ? Order.findById(session.orderId)
+          .populate("categoryId", "name icon")
+          .populate("governmentId", "name nameAr")
+          .lean()
+      : null,
+    session.offerId ? Offer.findById(session.offerId).lean() : null,
+  ]);
+
   return {
     ...sessionObj,
     order: order || null,
     offer: offer || null,
+    bundleBooking: null,
+    bundle: null,
     customer: customer || null,
     supplier: supplier || null,
   };
@@ -313,47 +340,62 @@ export class SessionService {
             throw new AppError("Failed to cancel session", 409);
           }
 
-          relatedOrder = await Order.findById(session.orderId).session(dbSession);
+          if (session.orderId && session.offerId) {
+            // Order-based session cancellation
+            relatedOrder = await Order.findById(session.orderId).session(dbSession);
 
-          if (!relatedOrder) {
-            throw new AppError("Associated order not found", 404);
-          }
+            if (!relatedOrder) {
+              throw new AppError("Associated order not found", 404);
+            }
 
-          await Offer.findByIdAndUpdate(
-            session.offerId,
-            {
-              $set: isCustomer
-                ? { status: OFFER_STATUS.REJECTED, rejectedAt: new Date() }
-                : { status: OFFER_STATUS.WITHDRAWN, withdrawnAt: new Date() },
-            },
-            { session: dbSession, new: true },
-          );
-
-          if (isCustomer) {
-            await Offer.updateMany(
+            await Offer.findByIdAndUpdate(
+              session.offerId,
               {
-                orderId: relatedOrder._id,
-                status: OFFER_STATUS.PENDING,
+                $set: isCustomer
+                  ? { status: OFFER_STATUS.REJECTED, rejectedAt: new Date() }
+                  : { status: OFFER_STATUS.WITHDRAWN, withdrawnAt: new Date() },
               },
+              { session: dbSession, new: true },
+            );
+
+            if (isCustomer) {
+              await Offer.updateMany(
+                {
+                  orderId: relatedOrder._id,
+                  status: OFFER_STATUS.PENDING,
+                },
+                {
+                  $set: {
+                    status: OFFER_STATUS.REJECTED,
+                    rejectedAt: new Date(),
+                  },
+                },
+                { session: dbSession },
+              );
+
+              await OrderRepository.markCancelled(
+                {
+                  orderId: relatedOrder._id,
+                  cancelledBy: ORDER_CANCELLED_BY.CUSTOMER,
+                  cancellationReason: reason || "customer_cancelled_session",
+                },
+                dbSession,
+              );
+            } else {
+              await OrderRepository.resetToPending(relatedOrder._id, dbSession);
+            }
+          } else if (session.bundleBookingId) {
+            // Bundle booking session cancellation
+            await BundleBookingModel.findByIdAndUpdate(
+              session.bundleBookingId,
               {
                 $set: {
-                  status: OFFER_STATUS.REJECTED,
-                  rejectedAt: new Date(),
+                  status: "cancelled",
+                  cancelledBy: isCustomer ? "customer" : "supplier",
                 },
               },
               { session: dbSession },
             );
-
-            await OrderRepository.markCancelled(
-              {
-                orderId: relatedOrder._id,
-                cancelledBy: ORDER_CANCELLED_BY.CUSTOMER,
-                cancellationReason: reason || "customer_cancelled_session",
-              },
-              dbSession,
-            );
-          } else {
-            await OrderRepository.resetToPending(relatedOrder._id, dbSession);
           }
 
           return;
@@ -499,17 +541,26 @@ export class SessionService {
           throw new AppError("Failed to complete session", 409);
         }
 
-        const [completedOrder, completedOffer] = await Promise.all([
-          OrderRepository.markCompleted(session.orderId, dbSession),
-          OfferRepository.markCompleted(session.offerId, dbSession),
-        ]);
+        if (session.orderId && session.offerId) {
+          const [completedOrder, completedOffer] = await Promise.all([
+            OrderRepository.markCompleted(session.orderId, dbSession),
+            OfferRepository.markCompleted(session.offerId, dbSession),
+          ]);
 
-        if (!completedOrder) {
-          throw new AppError("Failed to complete order", 409);
-        }
+          if (!completedOrder) {
+            throw new AppError("Failed to complete order", 409);
+          }
 
-        if (!completedOffer) {
-          throw new AppError("Failed to complete offer", 409);
+          if (!completedOffer) {
+            throw new AppError("Failed to complete offer", 409);
+          }
+        } else if (session.bundleBookingId) {
+          const BundleBookingModel = (await import("../../bundleBooking/models/bundleBooking.model")).default;
+          await BundleBookingModel.findByIdAndUpdate(
+            session.bundleBookingId,
+            { $set: { status: "completed", paymentConfirmed: true, paymentConfirmedAt: new Date() } },
+            { session: dbSession },
+          );
         }
       });
     } finally {
@@ -540,6 +591,26 @@ export class SessionService {
 
     if (!session) {
       throw new AppError("Session not found", 404);
+    }
+
+    this.ensureParticipant(session, input.userId);
+
+    const populatedSession = await populateSessionData(session);
+
+    return {
+      success: true,
+      data: { session: populatedSession },
+    };
+  }
+
+  static async getSessionByBundleBooking(input: {
+    bundleBookingId: string;
+    userId: string;
+  }) {
+    const session = await SessionRepository.findByBundleBookingId(input.bundleBookingId);
+
+    if (!session) {
+      throw new AppError("Session not found for this booking", 404);
     }
 
     this.ensureParticipant(session, input.userId);
@@ -637,7 +708,6 @@ export class SessionService {
     }
 
     const populatedSession = await populateSessionData(session);
-    const order = populatedSession?.order;
 
     const isCustomer = String(session.customerId) === String(input.actorUserId);
     const isSupplier = String(session.supplierId) === String(input.actorUserId);
@@ -656,7 +726,10 @@ export class SessionService {
     }
 
     if (session.status === SESSION_STATUS.COMPLETED) {
-      if (isCustomer && !order?.customerReviewed) {
+      // Determine review status from either order or bundleBooking
+      const reviewSource = populatedSession?.order || populatedSession?.bundleBooking;
+
+      if (isCustomer && !reviewSource?.customerReviewed) {
         return {
           success: true,
           hasAction: true,
@@ -674,7 +747,7 @@ export class SessionService {
         };
       }
 
-      if (isSupplier && session.paymentConfirmed && !order?.supplierReviewed) {
+      if (isSupplier && session.paymentConfirmed && !reviewSource?.supplierReviewed) {
         return {
           success: true,
           hasAction: true,

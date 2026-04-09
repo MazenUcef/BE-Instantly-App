@@ -2,6 +2,9 @@ import { Response } from "express";
 import { OrderService } from "../services/order.service";
 
 export const createOrder = async (req: any, res: Response) => {
+  const imageFiles = (req.files?.images || []) as Express.Multer.File[];
+  const docFiles = (req.files?.files || []) as Express.Multer.File[];
+
   const result = await OrderService.createOrder({
     customerId: req.user.userId,
     customerName: req.user.name,
@@ -14,6 +17,8 @@ export const createOrder = async (req: any, res: Response) => {
     jobTitle: req.body.jobTitle,
     orderType: req.body.orderType,
     selectedWorkflow: req.body.selectedWorkflow,
+    imageFiles,
+    docFiles,
   });
 
   return res.status(201).json(result);
@@ -74,6 +79,17 @@ export const getCustomerOrderHistory = async (req: any, res: Response) => {
 export const checkPendingOrders = async (req: any, res: Response) => {
   const result = await OrderService.checkPendingOrders({
     userId: req.user.userId,
+  });
+
+  return res.status(200).json(result);
+};
+
+export const getTimeline = async (req: any, res: Response) => {
+  const result = await OrderService.getTimeline({
+    userId: req.user.userId,
+    role: req.user.role,
+    page: Number(req.query.page || 1),
+    limit: Number(req.query.limit || 20),
   });
 
   return res.status(200).json(result);

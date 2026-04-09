@@ -59,6 +59,15 @@ export const getSessionByOrder = async (req: any, res: Response) => {
   return res.status(200).json(result);
 };
 
+export const getSessionByBundleBooking = async (req: any, res: Response) => {
+  const result = await SessionService.getSessionByBundleBooking({
+    bundleBookingId: req.params.bundleBookingId,
+    userId: req.user.userId,
+  });
+
+  return res.status(200).json(result);
+};
+
 export const confirmSessionPayment = async (req: any, res: Response) => {
   const result = await SessionService.confirmSessionPayment({
     sessionId: req.params.sessionId,

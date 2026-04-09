@@ -16,6 +16,7 @@ export class BundleRepository {
       durationMinutes: number;
       includes?: string[];
       tags?: string[];
+      selectedWorkflow?: string | null;
       isActive?: boolean;
     },
     session?: ClientSession,

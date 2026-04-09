@@ -3,6 +3,7 @@ import { AppError } from "../../../shared/middlewares/errorHandler";
 import { ReviewRepository } from "../repositories/review.repository";
 import ReviewModel from "../models/review.model";
 import OrderModel from "../../order/models/Order.model";
+import BundleBookingModel from "../../bundleBooking/models/bundleBooking.model";
 import SessionModel from "../../session/models/session.model";
 import UserModel from "../../auth/models/User.model";
 import { REVIEW_NOTIFICATION_TYPES, REVIEW_ROLES } from "../../../shared/constants/review.constants";
@@ -11,12 +12,17 @@ import { publishNotification } from "../../notification/notification.publisher";
 export class ReviewService {
   static async createReview(input: {
     actorUserId: string;
-    orderId: string;
+    orderId?: string;
+    bundleBookingId?: string;
     rating: number;
     comment: string;
     role: string;
   }) {
-    const { actorUserId, orderId, rating, comment, role } = input;
+    const { actorUserId, orderId, bundleBookingId, rating, comment, role } = input;
+
+    if (!orderId && !bundleBookingId) {
+      throw new AppError("Either orderId or bundleBookingId is required", 400);
+    }
 
     const dbSession = await mongoose.startSession();
 
@@ -28,6 +34,7 @@ export class ReviewService {
     let customerId: string | null = null;
     let supplierId: string | null = null;
     let bothReviewed = false;
+    const referenceId = orderId || bundleBookingId!;
 
     try {
       await dbSession.withTransaction(async () => {
@@ -35,18 +42,32 @@ export class ReviewService {
           throw new AppError("Invalid review role", 400);
         }
 
-        const order = await OrderModel.findById(orderId).session(dbSession);
-        if (!order) {
-          throw new AppError("Order not found", 404);
-        }
+        let reviewSource: any = null;
+        let session: any = null;
 
-        const session = await SessionModel.findOne({ orderId }).session(dbSession);
-        if (!session) {
-          throw new AppError("Session not found for this order", 404);
+        if (orderId) {
+          const order = await OrderModel.findById(orderId).session(dbSession);
+          if (!order) throw new AppError("Order not found", 404);
+          session = await SessionModel.findOne({ orderId }).session(dbSession);
+          if (!session) throw new AppError("Session not found for this order", 404);
+          if (order.status !== "completed") {
+            throw new AppError("Reviews can only be submitted after completion", 400);
+          }
+          customerId = order.customerId.toString();
+          supplierId = session.supplierId.toString();
+          reviewSource = order;
+        } else {
+          const booking = await BundleBookingModel.findById(bundleBookingId).session(dbSession);
+          if (!booking) throw new AppError("Booking not found", 404);
+          session = await SessionModel.findOne({ bundleBookingId }).session(dbSession);
+          if (!session) throw new AppError("Session not found for this booking", 404);
+          if (booking.status !== "completed") {
+            throw new AppError("Reviews can only be submitted after completion", 400);
+          }
+          customerId = booking.customerId.toString();
+          supplierId = booking.supplierId.toString();
+          reviewSource = booking;
         }
-
-        customerId = order.customerId.toString();
-        supplierId = session.supplierId.toString();
 
         const isCustomerReviewer = role === REVIEW_ROLES.CUSTOMER;
         const isSupplierReviewer = role === REVIEW_ROLES.SUPPLIER;
@@ -59,19 +80,15 @@ export class ReviewService {
           throw new AppError("Only the supplier can submit a supplier review", 403);
         }
 
-        if (order.status !== "completed") {
-          throw new AppError("Reviews can only be submitted after order completion", 400);
+        if (isCustomerReviewer && reviewSource.customerReviewed) {
+          throw new AppError("Customer has already reviewed", 400);
         }
 
-        if (isCustomerReviewer && order.customerReviewed) {
-          throw new AppError("Customer has already reviewed this order", 400);
+        if (isSupplierReviewer && reviewSource.supplierReviewed) {
+          throw new AppError("Supplier has already reviewed", 400);
         }
 
-        if (isSupplierReviewer && order.supplierReviewed) {
-          throw new AppError("Supplier has already reviewed this order", 400);
-        }
-
-        targetUserId = isCustomerReviewer ? supplierId : customerId;
+        targetUserId = isCustomerReviewer ? supplierId! : customerId!;
 
         if (actorUserId === targetUserId) {
           throw new AppError("You cannot review yourself", 400);
@@ -79,19 +96,19 @@ export class ReviewService {
 
         const existingReview = await ReviewRepository.findByReviewerAndOrder(
           actorUserId,
-          orderId,
+          referenceId,
           dbSession,
         );
 
         if (existingReview) {
-          throw new AppError("You have already reviewed this order", 400);
+          throw new AppError("You have already submitted a review", 400);
         }
 
         createdReview = await ReviewRepository.create(
           {
             reviewerId: actorUserId,
             targetUserId,
-            orderId,
+            orderId: orderId || referenceId,
             sessionId: session._id,
             rating,
             comment,
@@ -102,11 +119,20 @@ export class ReviewService {
         const reviewedField =
           role === REVIEW_ROLES.CUSTOMER ? "customerReviewed" : "supplierReviewed";
 
-        const updatedOrder = await OrderModel.findByIdAndUpdate(
-          orderId,
-          { $set: { [reviewedField]: true } },
-          { new: true, session: dbSession },
-        );
+        let updatedSource: any;
+        if (orderId) {
+          updatedSource = await OrderModel.findByIdAndUpdate(
+            orderId,
+            { $set: { [reviewedField]: true } },
+            { new: true, session: dbSession },
+          );
+        } else {
+          updatedSource = await BundleBookingModel.findByIdAndUpdate(
+            bundleBookingId,
+            { $set: { [reviewedField]: true } },
+            { new: true, session: dbSession },
+          );
+        }
 
         const stats = await ReviewRepository.aggregateTargetUserStats(
           targetUserId,
@@ -118,12 +144,7 @@ export class ReviewService {
 
         await UserModel.findByIdAndUpdate(
           targetUserId,
-          {
-            $set: {
-              averageRating,
-              totalReviews,
-            },
-          },
+          { $set: { averageRating, totalReviews } },
           { session: dbSession },
         );
 
@@ -136,7 +157,7 @@ export class ReviewService {
           : "Someone";
 
         bothReviewed = Boolean(
-          updatedOrder?.customerReviewed && updatedOrder?.supplierReviewed,
+          updatedSource?.customerReviewed && updatedSource?.supplierReviewed,
         );
       });
     } finally {
@@ -151,28 +172,31 @@ export class ReviewService {
       data: {
         reviewId: createdReview._id.toString(),
         reviewerId: actorUserId,
-        orderId,
+        orderId: orderId || null,
+        bundleBookingId: bundleBookingId || null,
         rating,
         comment,
       },
     });
 
     if (bothReviewed && customerId && supplierId) {
-      await publishNotification({
-        userId: customerId,
-        type: REVIEW_NOTIFICATION_TYPES.REVIEWS_COMPLETE,
-        title: "All Reviews Submitted",
-        message: "Both you and the supplier have submitted your reviews.",
-        data: { orderId },
-      });
-
-      await publishNotification({
-        userId: supplierId,
-        type: REVIEW_NOTIFICATION_TYPES.REVIEWS_COMPLETE,
-        title: "All Reviews Submitted",
-        message: "Both you and the customer have submitted your reviews.",
-        data: { orderId },
-      });
+      const refData = orderId ? { orderId } : { bundleBookingId };
+      await Promise.all([
+        publishNotification({
+          userId: customerId,
+          type: REVIEW_NOTIFICATION_TYPES.REVIEWS_COMPLETE,
+          title: "All Reviews Submitted",
+          message: "Both you and the supplier have submitted your reviews.",
+          data: refData,
+        }),
+        publishNotification({
+          userId: supplierId,
+          type: REVIEW_NOTIFICATION_TYPES.REVIEWS_COMPLETE,
+          title: "All Reviews Submitted",
+          message: "Both you and the customer have submitted your reviews.",
+          data: refData,
+        }),
+      ]);
     }
 
     return {

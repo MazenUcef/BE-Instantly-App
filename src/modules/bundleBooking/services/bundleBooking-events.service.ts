@@ -56,6 +56,21 @@ export class BundleBookingEventService {
     this.emitToCustomerAndSupplier(socketEvents.CANCELLED, booking);
   }
 
+  static emitTimeProposed(booking: any, proposedBy: "customer" | "supplier") {
+    const io = getIO();
+    const targetUserId =
+      proposedBy === "supplier"
+        ? String(booking.customerId)
+        : String(booking.supplierId);
+    const actorUserId =
+      proposedBy === "supplier"
+        ? String(booking.supplierId)
+        : String(booking.customerId);
+
+    io.to(socketRooms.user(targetUserId)).emit(socketEvents.TIME_PROPOSED, booking);
+    io.to(socketRooms.user(actorUserId)).emit(socketEvents.UPDATED, booking);
+  }
+
   static async notifyCreated(booking: any, bundleTitle?: string) {
     await publishNotification({
       userId: String(booking.supplierId),
@@ -93,6 +108,28 @@ export class BundleBookingEventService {
         bookingId: String(booking._id),
         bundleId: String(booking.bundleId),
         rejectionReason: booking.rejectionReason || null,
+      },
+    });
+  }
+
+  static async notifyTimeProposed(booking: any, proposedBy: "customer" | "supplier") {
+    const targetUserId =
+      proposedBy === "supplier"
+        ? String(booking.customerId)
+        : String(booking.supplierId);
+
+    const actorLabel = proposedBy === "supplier" ? "supplier" : "customer";
+
+    await publishNotification({
+      userId: targetUserId,
+      type: BUNDLE_BOOKING_NOTIFICATION_TYPES.TIME_PROPOSED,
+      title: "New Time Proposed",
+      message: `The ${actorLabel} has proposed a different time for your booking. Please review.`,
+      data: {
+        bookingId: String(booking._id),
+        proposedBookedDate: booking.proposedBookedDate,
+        proposedSlotStart: booking.proposedSlotStart,
+        proposedSlotEnd: booking.proposedSlotEnd,
       },
     });
   }

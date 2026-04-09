@@ -8,7 +8,7 @@ export class OfferRepository {
       orderId: Types.ObjectId | string;
       supplierId: Types.ObjectId | string;
       amount: number;
-      timeRange?: string | null;
+      estimatedDuration?: number | null;
       timeToStart?: Date | string | null;
       expiresAt?: Date | null;
       status?: string;
@@ -99,7 +99,7 @@ export class OfferRepository {
     offerId: Types.ObjectId | string,
     data: {
       amount: number;
-      timeRange?: string | null;
+      estimatedDuration?: number | null;
       timeToStart?: Date | string | null;
       expiresAt?: Date | null;
     },
@@ -110,13 +110,30 @@ export class OfferRepository {
       {
         $set: {
           amount: data.amount,
-          timeRange: data.timeRange ?? null,
+          estimatedDuration: data.estimatedDuration ?? null,
           timeToStart: data.timeToStart ?? null,
           expiresAt: data.expiresAt ?? null,
         },
       },
       { new: true, session },
     );
+  }
+
+  static findSupplierScheduledWindows(
+    supplierId: Types.ObjectId | string,
+    excludeOfferId?: Types.ObjectId | string,
+    session?: ClientSession,
+  ) {
+    const filter: any = {
+      supplierId,
+      status: OFFER_STATUS.ACCEPTED,
+      timeToStart: { $ne: null },
+      estimatedDuration: { $ne: null },
+    };
+    if (excludeOfferId) {
+      filter._id = { $ne: excludeOfferId };
+    }
+    return offerModel.find(filter).select("timeToStart estimatedDuration").session(session || null);
   }
 
   static acceptPendingOffer(
