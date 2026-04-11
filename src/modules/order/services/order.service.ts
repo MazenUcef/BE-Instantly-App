@@ -7,6 +7,7 @@ import governmentModel from "../../government/models/Government.model";
 import categoryModel from "../../category/models/Category.model";
 import BundleBookingModel from "../../bundleBooking/models/bundleBooking.model";
 import bundleModel from "../../bundle/models/bundle.model";
+import ReviewModel from "../../review/models/review.model";
 import { AppError } from "../../../shared/middlewares/errorHandler";
 import { OrderRepository } from "../repositories/order.repository";
 import { OrderEventService } from "./order-event.service";
@@ -675,36 +676,69 @@ export class OrderService {
 
     const enrichedOrders = await Promise.all(
       orders.map(async (order: any) => {
-        const [offer, session] = await Promise.all([
+        const orderObj = order.toObject();
+
+        const [offer, session, category, government, reviews] = await Promise.all([
           OfferModel.findOne({ orderId: order._id, status: { $in: ["accepted", "completed", "withdrawn"] } })
             .sort({ updatedAt: -1 })
             .lean(),
           sessionModel.findOne({ orderId: order._id }).lean(),
+          categoryModel.findById(order.categoryId).select("name image jobs workflows").lean(),
+          governmentModel.findById(order.governmentId).select("name nameAr").lean(),
+          ReviewModel.find({ orderId: order._id }).lean(),
         ]);
+
+        const [supplier, customer] = await Promise.all([
+          offer?.supplierId
+            ? UserModel.findById(offer.supplierId)
+                .select("-password -refreshToken -biometrics")
+                .lean()
+            : null,
+          UserModel.findById(order.customerId)
+            .select("-password -refreshToken -biometrics")
+            .lean(),
+        ]);
+
         return {
           type: "order" as const,
-          ...order.toObject(),
-          offer: offer || null,
+          ...orderObj,
+          category: category || null,
+          government: government || null,
+          customer: customer || null,
+          offer: offer
+            ? { ...offer, supplier: supplier || null }
+            : null,
           session: session || null,
+          reviews: reviews || [],
         };
       }),
     );
 
     const enrichedBookings = await Promise.all(
       bookings.map(async (booking: any) => {
-        const [bundle, supplier, session] = await Promise.all([
+        const [bundle, supplier, customer, session, category, government, reviews] = await Promise.all([
           bundleModel.findById(booking.bundleId).lean(),
           UserModel.findById(booking.supplierId)
             .select("-password -refreshToken -biometrics")
             .lean(),
+          UserModel.findById(booking.customerId)
+            .select("-password -refreshToken -biometrics")
+            .lean(),
           sessionModel.findOne({ bundleBookingId: booking._id }).lean(),
+          categoryModel.findById(booking.categoryId).select("name").lean(),
+          governmentModel.findById(booking.governmentId).select("name nameAr").lean(),
+          ReviewModel.find({ orderId: booking._id }).lean(),
         ]);
         return {
           type: "bundle_booking" as const,
           ...booking,
+          category: category || null,
+          government: government || null,
+          customer: customer || null,
           bundle: bundle || null,
           supplier: supplier || null,
           session: session || null,
+          reviews: reviews || [],
         };
       }),
     );
