@@ -661,8 +661,9 @@ export class OrderService {
     role: string;
     page?: number;
     limit?: number;
+    sort?: "recent" | "oldest";
   }) {
-    const { userId, page = 1, limit = 20 } = input;
+    const { userId, page = 1, limit = 20, sort = "recent" } = input;
     const skip = (page - 1) * limit;
 
     const [orders, ordersTotal, bookings, bookingsTotal] = await Promise.all([
@@ -746,7 +747,7 @@ export class OrderService {
     const merged = [...enrichedOrders, ...enrichedBookings].sort((a, b) => {
       const dateA = a.scheduledAt ? new Date(a.scheduledAt).getTime() : new Date(a.createdAt).getTime();
       const dateB = b.scheduledAt ? new Date(b.scheduledAt).getTime() : new Date(b.createdAt).getTime();
-      return dateA - dateB;
+      return sort === "recent" ? dateB - dateA : dateA - dateB;
     });
 
     const total = ordersTotal + bookingsTotal;
