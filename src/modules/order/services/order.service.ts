@@ -679,7 +679,7 @@ export class OrderService {
         const orderObj = order.toObject();
 
         const [offer, session, category, government, reviews] = await Promise.all([
-          OfferModel.findOne({ orderId: order._id, status: { $in: ["accepted", "completed", "withdrawn"] } })
+          OfferModel.findOne({ orderId: order._id, status: { $in: ["accepted", "completed", "withdrawn", "rejected"] } })
             .sort({ updatedAt: -1 })
             .lean(),
           sessionModel.findOne({ orderId: order._id }).lean(),
