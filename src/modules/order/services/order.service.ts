@@ -21,7 +21,10 @@ import {
   socketEvents,
   socketRooms,
 } from "../../../shared/config/socket";
-import { SESSION_STATUS, SESSION_CANCELLED_BY } from "../../../shared/constants/session.constants";
+import {
+  SESSION_STATUS,
+  SESSION_CANCELLED_BY,
+} from "../../../shared/constants/session.constants";
 import { OFFER_STATUS } from "../../../shared/constants/offer.constants";
 import { SessionEventService } from "../../session/services/session-event.service";
 import {
@@ -62,10 +65,7 @@ export class OrderService {
     );
 
     if (!workflow) {
-      const error = new AppError(
-        "Invalid workflow for this category",
-        400,
-      );
+      const error = new AppError("Invalid workflow for this category", 400);
       (error as any).availableWorkflows = (category.workflows || []).map(
         (w) => w.key,
       );
@@ -79,11 +79,13 @@ export class OrderService {
     customerId: string,
     dbSession?: any,
   ) {
-    const [inProgressOrder, pendingOrder, unfinishedReview] = await Promise.all([
-      OrderRepository.findCustomerInProgressOrder(customerId, dbSession),
-      OrderRepository.findCustomerPendingOrder(customerId, dbSession),
-      OrderRepository.findCustomerPendingReviewOrder(customerId, dbSession),
-    ]);
+    const [inProgressOrder, pendingOrder, unfinishedReview] = await Promise.all(
+      [
+        OrderRepository.findCustomerInProgressOrder(customerId, dbSession),
+        OrderRepository.findCustomerPendingOrder(customerId, dbSession),
+        OrderRepository.findCustomerPendingReviewOrder(customerId, dbSession),
+      ],
+    );
 
     if (inProgressOrder) {
       throw new AppError(
@@ -276,8 +278,11 @@ export class OrderService {
     let activeSession: any = null;
     let acceptedOffer: any = null;
     let pendingOffers: any[] = [];
-    let flowType: "pending_cancel" | "scheduled_cancel" | "cancel_active_session_and_order" | null =
-      null;
+    let flowType:
+      | "pending_cancel"
+      | "scheduled_cancel"
+      | "cancel_active_session_and_order"
+      | null = null;
 
     try {
       await dbSession.withTransaction(async () => {
@@ -669,9 +674,7 @@ export class OrderService {
     const [orders, ordersTotal, bookings, bookingsTotal] = await Promise.all([
       OrderRepository.findCustomerTimeline(userId, 1, 999),
       OrderRepository.countCustomerTimeline(userId),
-      BundleBookingModel.find({ customerId: userId })
-        .sort({ scheduledAt: 1, createdAt: -1 })
-        .lean(),
+      BundleBookingModel.find({ customerId: userId }).lean(),
       BundleBookingModel.countDocuments({ customerId: userId }),
     ]);
 
@@ -679,15 +682,27 @@ export class OrderService {
       orders.map(async (order: any) => {
         const orderObj = order.toObject();
 
-        const [offer, session, category, government, reviews] = await Promise.all([
-          OfferModel.findOne({ orderId: order._id, status: { $in: ["accepted", "completed", "withdrawn", "rejected"] } })
-            .sort({ updatedAt: -1 })
-            .lean(),
-          sessionModel.findOne({ orderId: order._id }).lean(),
-          categoryModel.findById(order.categoryId).select("name image jobs workflows").lean(),
-          governmentModel.findById(order.governmentId).select("name nameAr").lean(),
-          ReviewModel.find({ orderId: order._id }).lean(),
-        ]);
+        const [offer, session, category, government, reviews] =
+          await Promise.all([
+            OfferModel.findOne({
+              orderId: order._id,
+              status: {
+                $in: ["accepted", "completed", "withdrawn", "rejected"],
+              },
+            })
+              .sort({ updatedAt: -1 })
+              .lean(),
+            sessionModel.findOne({ orderId: order._id }).lean(),
+            categoryModel
+              .findById(order.categoryId)
+              .select("name")
+              .lean(),
+            governmentModel
+              .findById(order.governmentId)
+              .select("name nameAr")
+              .lean(),
+            ReviewModel.find({ orderId: order._id }).lean(),
+          ]);
 
         const [supplier, customer] = await Promise.all([
           offer?.supplierId
@@ -706,9 +721,7 @@ export class OrderService {
           category: category || null,
           government: government || null,
           customer: customer || null,
-          offer: offer
-            ? { ...offer, supplier: supplier || null }
-            : null,
+          offer: offer ? { ...offer, supplier: supplier || null } : null,
           session: session || null,
           reviews: reviews || [],
         };
@@ -717,7 +730,15 @@ export class OrderService {
 
     const enrichedBookings = await Promise.all(
       bookings.map(async (booking: any) => {
-        const [bundle, supplier, customer, session, category, government, reviews] = await Promise.all([
+        const [
+          bundle,
+          supplier,
+          customer,
+          session,
+          category,
+          government,
+          reviews,
+        ] = await Promise.all([
           bundleModel.findById(booking.bundleId).lean(),
           UserModel.findById(booking.supplierId)
             .select("-password -refreshToken -biometrics")
@@ -727,9 +748,13 @@ export class OrderService {
             .lean(),
           sessionModel.findOne({ bundleBookingId: booking._id }).lean(),
           categoryModel.findById(booking.categoryId).select("name").lean(),
-          governmentModel.findById(booking.governmentId).select("name nameAr").lean(),
+          governmentModel
+            .findById(booking.governmentId)
+            .select("name nameAr")
+            .lean(),
           ReviewModel.find({ orderId: booking._id }).lean(),
         ]);
+
         return {
           type: "bundle_booking" as const,
           ...booking,
@@ -744,9 +769,25 @@ export class OrderService {
       }),
     );
 
+    const getTimelineDate = (item: any) => {
+      return new Date(
+        item?.cancelledAt ||
+          item?.completedAt ||
+          item?.session?.cancelledAt ||
+          item?.session?.completedAt ||
+          item?.offer?.acceptedAt ||
+          item?.offer?.rejectedAt ||
+          item?.offer?.withdrawnAt ||
+          item?.scheduledAt ||
+          item?.updatedAt ||
+          item?.createdAt ||
+          0,
+      ).getTime();
+    };
+
     const merged = [...enrichedOrders, ...enrichedBookings].sort((a, b) => {
-      const dateA = a.scheduledAt ? new Date(a.scheduledAt).getTime() : new Date(a.createdAt).getTime();
-      const dateB = b.scheduledAt ? new Date(b.scheduledAt).getTime() : new Date(b.createdAt).getTime();
+      const dateA = getTimelineDate(a);
+      const dateB = getTimelineDate(b);
       return sort === "recent" ? dateB - dateA : dateA - dateB;
     });
 
