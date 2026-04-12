@@ -124,6 +124,7 @@ export class OrderService {
     jobTitle: string;
     orderType: "contract" | "daily";
     selectedWorkflow: string;
+    expectedDays?: number | null;
     imageFiles?: Express.Multer.File[];
     docFiles?: Express.Multer.File[];
   }) {
@@ -139,9 +140,17 @@ export class OrderService {
       jobTitle,
       orderType,
       selectedWorkflow,
+      expectedDays,
       imageFiles = [],
       docFiles = [],
     } = input;
+
+    const normalizedExpectedDays =
+      orderType === "daily" ? expectedDays ?? null : null;
+
+    if (orderType === "daily" && (!normalizedExpectedDays || normalizedExpectedDays < 1)) {
+      throw new AppError("expectedDays is required for daily orders", 400);
+    }
 
     // Upload files to Cloudinary before the transaction
     const [uploadedImages, uploadedFiles] = await Promise.all([
@@ -195,6 +204,7 @@ export class OrderService {
             timeToStart: timeToStart || null,
             orderType,
             selectedWorkflow,
+            expectedDays: normalizedExpectedDays,
             images,
             files,
             status: ORDER_STATUS.PENDING,

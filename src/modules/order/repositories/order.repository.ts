@@ -15,6 +15,7 @@ export class OrderRepository {
       requestedPrice: number;
       orderType: string;
       selectedWorkflow: string;
+      expectedDays?: number | null;
       timeToStart?: Date | string | null;
       images?: { url: string; publicId: string }[];
       files?: { url: string; publicId: string; originalName: string }[];

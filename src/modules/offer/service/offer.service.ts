@@ -5,7 +5,56 @@ import sessionModel from "../../session/models/session.model";
 import CategoryModel from "../../category/models/Category.model";
 import { AppError } from "../../../shared/middlewares/errorHandler";
 import { OfferEventService } from "./offer-event.service";
-import { ORDER_STATUS } from "../../../shared/constants/order.constants";
+import { ORDER_STATUS, ORDER_TYPE } from "../../../shared/constants/order.constants";
+
+const DAILY_START_HOUR = 9;
+const DAILY_DURATION_MINUTES = 8 * 60;
+
+function normalizeDailyStart(input: Date | string): Date {
+  const d = new Date(input);
+  d.setHours(DAILY_START_HOUR, 0, 0, 0);
+  return d;
+}
+
+function resolveOfferSchedule(
+  orderType: string,
+  input: {
+    timeToStart?: Date | string | null;
+    estimatedDuration?: number | null;
+    numberOfDays?: number | null;
+  },
+): { timeToStart: Date; estimatedDuration: number; numberOfDays: number | null } {
+  if (!input.timeToStart) {
+    throw new AppError("timeToStart is required", 400);
+  }
+
+  if (orderType === ORDER_TYPE.DAILY) {
+    if (!input.numberOfDays || input.numberOfDays < 1) {
+      throw new AppError(
+        "numberOfDays is required for daily orders and must be >= 1",
+        400,
+      );
+    }
+    return {
+      timeToStart: normalizeDailyStart(input.timeToStart),
+      estimatedDuration: DAILY_DURATION_MINUTES,
+      numberOfDays: input.numberOfDays,
+    };
+  }
+
+  if (!input.estimatedDuration || input.estimatedDuration < 1) {
+    throw new AppError(
+      "estimatedDuration is required for contract orders and must be >= 1 minute",
+      400,
+    );
+  }
+
+  return {
+    timeToStart: new Date(input.timeToStart),
+    estimatedDuration: input.estimatedDuration,
+    numberOfDays: null,
+  };
+}
 import { OFFER_STATUS } from "../../../shared/constants/offer.constants";
 import {
   getIO,
@@ -179,9 +228,10 @@ export class OfferService {
     orderId: string;
     amount: number;
     estimatedDuration?: number | null;
+    numberOfDays?: number | null;
     timeToStart?: string | Date | null;
   }) {
-    const { supplierId, orderId, amount, estimatedDuration, timeToStart } = input;
+    const { supplierId, orderId, amount } = input;
 
     if (!amount || amount <= 0) {
       throw new AppError("Offer amount must be greater than 0", 400);
@@ -212,18 +262,25 @@ export class OfferService {
           );
         }
 
-        if (timeToStart && estimatedDuration) {
-          const parsedStart = new Date(timeToStart);
-          if (parsedStart > new Date()) {
-            const conflict = await this.checkSupplierTimeConflict(
-              supplierId, parsedStart, estimatedDuration, undefined, dbSession,
+        const schedule = resolveOfferSchedule(order.orderType, {
+          timeToStart: input.timeToStart,
+          estimatedDuration: input.estimatedDuration,
+          numberOfDays: input.numberOfDays,
+        });
+
+        if (schedule.timeToStart > new Date()) {
+          const conflict = await this.checkSupplierTimeConflict(
+            supplierId,
+            schedule.timeToStart,
+            schedule.estimatedDuration,
+            undefined,
+            dbSession,
+          );
+          if (conflict) {
+            throw new AppError(
+              `Time conflict: you already have a booking starting at ${conflict.start.toISOString()} for ${conflict.durationMinutes} minutes`,
+              409,
             );
-            if (conflict) {
-              throw new AppError(
-                `Time conflict: you already have a booking starting at ${conflict.start.toISOString()} for ${conflict.durationMinutes} minutes`,
-                409,
-              );
-            }
           }
         }
 
@@ -239,8 +296,9 @@ export class OfferService {
             existingOffer._id,
             {
               amount,
-              estimatedDuration,
-              timeToStart,
+              estimatedDuration: schedule.estimatedDuration,
+              numberOfDays: schedule.numberOfDays,
+              timeToStart: schedule.timeToStart,
               expiresAt: null,
             },
             dbSession,
@@ -252,8 +310,9 @@ export class OfferService {
               orderId,
               supplierId,
               amount,
-              estimatedDuration,
-              timeToStart,
+              estimatedDuration: schedule.estimatedDuration,
+              numberOfDays: schedule.numberOfDays,
+              timeToStart: schedule.timeToStart,
               expiresAt: null,
               status: OFFER_STATUS.PENDING,
             },
@@ -304,8 +363,8 @@ export class OfferService {
         offerId: offer._id.toString(),
         supplierId,
         amount,
-        estimatedDuration,
-        timeToStart,
+        estimatedDuration: offer.estimatedDuration ?? null,
+        timeToStart: offer.timeToStart ?? null,
       }),
     ]);
 
@@ -924,8 +983,9 @@ export class OfferService {
     supplierId: string;
     timeToStart?: string | Date | null;
     estimatedDuration?: number | null;
+    numberOfDays?: number | null;
   }) {
-    const { orderId, supplierId, timeToStart, estimatedDuration } = input;
+    const { orderId, supplierId } = input;
 
     const dbSession = await mongoose.startSession();
     let order: any;
@@ -951,6 +1011,12 @@ export class OfferService {
           throw new AppError("You cannot accept your own order", 400);
         }
 
+        const schedule = resolveOfferSchedule(order.orderType, {
+          timeToStart: input.timeToStart,
+          estimatedDuration: input.estimatedDuration,
+          numberOfDays: input.numberOfDays,
+        });
+
         supplierPendingOffers =
           await OfferRepository.findPendingOffersBySupplier(
             supplierId,
@@ -962,8 +1028,9 @@ export class OfferService {
             orderId,
             supplierId,
             amount: order.requestedPrice,
-            timeToStart: timeToStart || null,
-            estimatedDuration: estimatedDuration || null,
+            timeToStart: schedule.timeToStart,
+            estimatedDuration: schedule.estimatedDuration,
+            numberOfDays: schedule.numberOfDays,
             status: OFFER_STATUS.ACCEPTED,
           },
           dbSession,
@@ -981,11 +1048,11 @@ export class OfferService {
           dbSession,
         );
 
-        const directStartTime = timeToStart ? new Date(timeToStart) : null;
-        const isDirectScheduled = directStartTime && directStartTime > new Date();
+        const directStartTime = schedule.timeToStart;
+        const isDirectScheduled = directStartTime > new Date();
 
         if (isDirectScheduled) {
-          const duration = estimatedDuration ?? 60;
+          const duration = schedule.estimatedDuration;
 
           const [supplierConflict, customerConflict] = await Promise.all([
             this.checkSupplierTimeConflict(
@@ -1011,7 +1078,7 @@ export class OfferService {
 
           const updatedOrder = await OrderRepository.markScheduled(
             order._id, supplierId, order.requestedPrice,
-            directStartTime, estimatedDuration ?? null, dbSession,
+            directStartTime, schedule.estimatedDuration, dbSession,
           );
           if (!updatedOrder) throw new AppError("Order state changed concurrently", 409);
         } else {

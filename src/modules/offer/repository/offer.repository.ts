@@ -9,6 +9,7 @@ export class OfferRepository {
       supplierId: Types.ObjectId | string;
       amount: number;
       estimatedDuration?: number | null;
+      numberOfDays?: number | null;
       timeToStart?: Date | string | null;
       expiresAt?: Date | null;
       status?: string;
@@ -100,6 +101,7 @@ export class OfferRepository {
     data: {
       amount: number;
       estimatedDuration?: number | null;
+      numberOfDays?: number | null;
       timeToStart?: Date | string | null;
       expiresAt?: Date | null;
     },
@@ -111,6 +113,7 @@ export class OfferRepository {
         $set: {
           amount: data.amount,
           estimatedDuration: data.estimatedDuration ?? null,
+          numberOfDays: data.numberOfDays ?? null,
           timeToStart: data.timeToStart ?? null,
           expiresAt: data.expiresAt ?? null,
         },

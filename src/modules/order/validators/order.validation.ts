@@ -45,9 +45,24 @@ export const validateCreateOrder: RequestHandler[] = [
     .isLength({ min: 2, max: 50 })
     .withMessage("selectedWorkflow must be between 2 and 50 characters"),
   body("timeToStart")
-    .optional({ nullable: true })
+    .notEmpty()
+    .withMessage("timeToStart is required")
+    .bail()
     .isISO8601()
     .withMessage("timeToStart must be a valid ISO date"),
+  body("expectedDays")
+    .if(body("orderType").equals(ORDER_TYPE.DAILY))
+    .notEmpty()
+    .withMessage("expectedDays is required for daily orders")
+    .bail()
+    .isInt({ min: 1, max: 365 })
+    .withMessage("expectedDays must be an integer between 1 and 365")
+    .toInt(),
+  body("expectedDays")
+    .if(body("orderType").equals(ORDER_TYPE.CONTRACT))
+    .not()
+    .exists()
+    .withMessage("expectedDays is not allowed for contract orders"),
   handleValidationErrors,
 ];
 

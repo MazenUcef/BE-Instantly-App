@@ -30,10 +30,16 @@ export const validateCreateOffer: RequestHandler[] = [
     .withMessage("amount must be >= 1"),
   body("estimatedDuration")
     .optional({ nullable: true })
-    .isInt({ min: 1, max: 1440 })
-    .withMessage("estimatedDuration must be an integer between 1 and 1440 minutes"),
-  body("timeToStart")
+    .isInt({ min: 1 })
+    .withMessage("estimatedDuration must be an integer >= 1 minute"),
+  body("numberOfDays")
     .optional({ nullable: true })
+    .isInt({ min: 1 })
+    .withMessage("numberOfDays must be an integer >= 1"),
+  body("timeToStart")
+    .notEmpty()
+    .withMessage("timeToStart is required")
+    .bail()
     .isISO8601()
     .withMessage("timeToStart must be a valid ISO date"),
   handleValidationErrors,
@@ -41,13 +47,19 @@ export const validateCreateOffer: RequestHandler[] = [
 
 export const validateAcceptOrderDirect: RequestHandler[] = [
   body("timeToStart")
-    .optional({ nullable: true })
+    .notEmpty()
+    .withMessage("timeToStart is required")
+    .bail()
     .isISO8601()
     .withMessage("timeToStart must be a valid ISO date"),
   body("estimatedDuration")
     .optional({ nullable: true })
-    .isInt({ min: 1, max: 1440 })
-    .withMessage("estimatedDuration must be between 1 and 1440 minutes"),
+    .isInt({ min: 1 })
+    .withMessage("estimatedDuration must be an integer >= 1 minute"),
+  body("numberOfDays")
+    .optional({ nullable: true })
+    .isInt({ min: 1 })
+    .withMessage("numberOfDays must be an integer >= 1"),
   handleValidationErrors,
 ];
 

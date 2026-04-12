@@ -20,6 +20,7 @@ export interface IOrder extends Document {
   requestedPrice: number;
   orderType: OrderType;
   selectedWorkflow: string;
+  expectedDays?: number | null;
   status: OrderStatus;
   finalPrice?: number | null;
   customerReviewed: boolean;
@@ -102,6 +103,12 @@ const orderSchema = new Schema<IOrder>(
       type: String,
       required: true,
       trim: true,
+    },
+    expectedDays: {
+      type: Number,
+      default: null,
+      min: 1,
+      max: 365,
     },
     timeToStart: {
       type: Date,
