@@ -63,6 +63,19 @@ export const validateCreateOrder: RequestHandler[] = [
     .not()
     .exists()
     .withMessage("expectedDays is not allowed for contract orders"),
+  body("estimatedDuration")
+    .if(body("orderType").equals(ORDER_TYPE.CONTRACT))
+    .notEmpty()
+    .withMessage("estimatedDuration is required for contract orders")
+    .bail()
+    .isInt({ min: 1 })
+    .withMessage("estimatedDuration must be an integer >= 1 minute")
+    .toInt(),
+  body("estimatedDuration")
+    .if(body("orderType").equals(ORDER_TYPE.DAILY))
+    .not()
+    .exists()
+    .withMessage("estimatedDuration is not allowed for daily orders"),
   handleValidationErrors,
 ];
 

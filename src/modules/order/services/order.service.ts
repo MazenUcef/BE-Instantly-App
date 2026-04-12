@@ -125,6 +125,7 @@ export class OrderService {
     orderType: "contract" | "daily";
     selectedWorkflow: string;
     expectedDays?: number | null;
+    estimatedDuration?: number | null;
     imageFiles?: Express.Multer.File[];
     docFiles?: Express.Multer.File[];
   }) {
@@ -141,6 +142,7 @@ export class OrderService {
       orderType,
       selectedWorkflow,
       expectedDays,
+      estimatedDuration,
       imageFiles = [],
       docFiles = [],
     } = input;
@@ -150,6 +152,16 @@ export class OrderService {
 
     if (orderType === "daily" && (!normalizedExpectedDays || normalizedExpectedDays < 1)) {
       throw new AppError("expectedDays is required for daily orders", 400);
+    }
+
+    const normalizedEstimatedDuration =
+      orderType === "contract" ? estimatedDuration ?? null : null;
+
+    if (
+      orderType === "contract" &&
+      (!normalizedEstimatedDuration || normalizedEstimatedDuration < 1)
+    ) {
+      throw new AppError("estimatedDuration is required for contract orders", 400);
     }
 
     // Upload files to Cloudinary before the transaction
@@ -205,6 +217,7 @@ export class OrderService {
             orderType,
             selectedWorkflow,
             expectedDays: normalizedExpectedDays,
+            estimatedDuration: normalizedEstimatedDuration,
             images,
             files,
             status: ORDER_STATUS.PENDING,

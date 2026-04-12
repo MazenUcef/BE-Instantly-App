@@ -21,6 +21,10 @@ export const createOrder = async (req: any, res: Response) => {
       req.body.expectedDays !== undefined && req.body.expectedDays !== ""
         ? Number(req.body.expectedDays)
         : null,
+    estimatedDuration:
+      req.body.estimatedDuration !== undefined && req.body.estimatedDuration !== ""
+        ? Number(req.body.estimatedDuration)
+        : null,
     imageFiles,
     docFiles,
   });
