@@ -715,7 +715,10 @@ export class OrderService {
             })
               .sort({ updatedAt: -1 })
               .lean(),
-            sessionModel.findOne({ orderId: order._id }).lean(),
+            sessionModel
+              .findOne({ orderId: order._id })
+              .sort({ createdAt: -1 })
+              .lean(),
             categoryModel
               .findById(order.categoryId)
               .select("name")
