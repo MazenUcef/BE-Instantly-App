@@ -981,9 +981,6 @@ export class OfferService {
   static async acceptOrderDirect(input: {
     orderId: string;
     supplierId: string;
-    timeToStart?: string | Date | null;
-    estimatedDuration?: number | null;
-    numberOfDays?: number | null;
   }) {
     const { orderId, supplierId } = input;
 
@@ -1011,10 +1008,14 @@ export class OfferService {
           throw new AppError("You cannot accept your own order", 400);
         }
 
+        if (!order.timeToStart) {
+          throw new AppError("Order is missing timeToStart", 400);
+        }
+
         const schedule = resolveOfferSchedule(order.orderType, {
-          timeToStart: input.timeToStart,
-          estimatedDuration: input.estimatedDuration,
-          numberOfDays: input.numberOfDays,
+          timeToStart: order.timeToStart,
+          estimatedDuration: order.estimatedDuration,
+          numberOfDays: order.expectedDays,
         });
 
         supplierPendingOffers =
