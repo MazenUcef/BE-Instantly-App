@@ -38,17 +38,17 @@ const startServer = async () => {
 startServer();
 
 const pingServer = () => {
-  const protocol = process.env.NODE_ENV === "production" ? https : http;
   const baseUrl = process.env.BASE_URL || `http://localhost:${PORT}`;
+  const client = baseUrl.startsWith("https") ? https : http;
 
-  protocol
+  client
     .get(`${baseUrl}/health`, (res) => {
       console.log(
         `Ping successful at ${new Date().toISOString()}, Status: ${res.statusCode}`,
       );
     })
     .on("error", (err) => {
-      console.error("Ping failed:", err.message);
+      console.error("Ping failed:", err.message || err);
     });
 };
 
