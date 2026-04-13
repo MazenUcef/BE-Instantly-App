@@ -3,10 +3,7 @@ import bundleBookingModel from "../../bundleBooking/models/bundleBooking.model";
 import orderModel from "../../order/models/Order.model";
 import offerModel from "../../offer/models/Offer.model";
 import { AppError } from "../../../shared/middlewares/errorHandler";
-import {
-  ACTIVE_BOOKING_STATUSES,
-  DEFAULT_ACCEPTED_JOB_DURATION_MINUTES,
-} from "../../../shared/constants/availability.constants";
+import { ACTIVE_BOOKING_STATUSES } from "../../../shared/constants/availability.constants";
 
 type DayStatus = "available" | "has_bookings";
 
@@ -180,19 +177,26 @@ export class AvailabilityService {
       });
     }
 
+    const DEFAULT_DAY_START_MINUTES = 9 * 60; // 09:00
+    const DEFAULT_DAY_END_MINUTES = 17 * 60; // 17:00
+
     for (const order of scheduledOrders) {
       if (!order.scheduledAt) continue;
       const startDate = new Date(order.scheduledAt);
       const days = Math.max(1, order.expectedDays || 1);
-      const endDate = new Date(startDate);
-      endDate.setUTCDate(endDate.getUTCDate() + days);
-      if (endDate <= dayStart || startDate > dayEnd) continue;
 
-      const startMinutes =
-        startDate.getUTCHours() * 60 + startDate.getUTCMinutes();
-      const duration =
-        order.estimatedDuration || DEFAULT_ACCEPTED_JOB_DURATION_MINUTES;
-      const endMinutes = Math.min(startMinutes + duration, 24 * 60);
+      const firstDayStr = getDateOnly(startDate);
+      const lastDay = new Date(startDate);
+      lastDay.setUTCDate(lastDay.getUTCDate() + days - 1);
+      const lastDayStr = getDateOnly(lastDay);
+
+      if (date < firstDayStr || date > lastDayStr) continue;
+
+      const isFirstDay = date === firstDayStr;
+      const startMinutes = isFirstDay
+        ? startDate.getUTCHours() * 60 + startDate.getUTCMinutes()
+        : DEFAULT_DAY_START_MINUTES;
+      const endMinutes = DEFAULT_DAY_END_MINUTES;
 
       bookedTimes.push({
         start: minutesToTime(startMinutes),
