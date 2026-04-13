@@ -7,6 +7,7 @@ import {
   getActiveOrdersByCategory,
   getCustomerOrderHistory,
   getOrderDetails,
+  getScheduledOrders,
   getTimeline,
   updateOrderPrice,
 } from "../controllers/order.controller";
@@ -43,6 +44,13 @@ router.get(
 );
 
 router.get("/check-pending", authenticate, checkPendingOrders);
+
+router.get(
+  "/scheduled",
+  authenticate,
+  authorize("customer", "supplier"),
+  getScheduledOrders,
+);
 
 router.get(
   "/timeline",

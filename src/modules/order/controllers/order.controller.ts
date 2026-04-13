@@ -84,6 +84,19 @@ export const getCustomerOrderHistory = async (req: any, res: Response) => {
   return res.status(200).json(result);
 };
 
+export const getScheduledOrders = async (req: any, res: Response) => {
+  const result = await OrderService.getScheduledOrders({
+    userId: req.user.userId,
+    role: req.user.role,
+    page: Number(req.query.page || 1),
+    limit: Number(req.query.limit || 20),
+    from: req.query.from as string | undefined,
+    to: req.query.to as string | undefined,
+  });
+
+  return res.status(200).json(result);
+};
+
 export const checkPendingOrders = async (req: any, res: Response) => {
   const result = await OrderService.checkPendingOrders({
     userId: req.user.userId,

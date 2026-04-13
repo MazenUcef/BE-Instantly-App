@@ -105,6 +105,61 @@ export class OrderRepository {
       .session(session || null);
   }
 
+  static findScheduledOrdersForUser(input: {
+    userId: Types.ObjectId | string;
+    role: "customer" | "supplier";
+    from?: Date | null;
+    to?: Date | null;
+    page?: number;
+    limit?: number;
+  }) {
+    const { userId, role, from, to, page = 1, limit = 20 } = input;
+    const filter: any = { status: ORDER_STATUS.SCHEDULED };
+    if (role === "customer") filter.customerId = userId;
+    else filter.supplierId = userId;
+
+    if (from || to) {
+      filter.scheduledAt = {};
+      if (from) filter.scheduledAt.$gte = from;
+      if (to) filter.scheduledAt.$lte = to;
+    }
+
+    const skip = (page - 1) * limit;
+    return OrderModel.find(filter)
+      .sort({ scheduledAt: 1, createdAt: -1 })
+      .skip(skip)
+      .limit(limit)
+      .populate(
+        "customerId",
+        "firstName lastName email phoneNumber profilePicture address",
+      )
+      .populate(
+        "supplierId",
+        "firstName lastName email phoneNumber profilePicture address",
+      )
+      .populate("categoryId", "name nameAr")
+      .populate("governmentId", "name nameAr")
+      .lean();
+  }
+
+  static countScheduledOrdersForUser(input: {
+    userId: Types.ObjectId | string;
+    role: "customer" | "supplier";
+    from?: Date | null;
+    to?: Date | null;
+  }) {
+    const { userId, role, from, to } = input;
+    const filter: any = { status: ORDER_STATUS.SCHEDULED };
+    if (role === "customer") filter.customerId = userId;
+    else filter.supplierId = userId;
+    if (from || to) {
+      filter.scheduledAt = {};
+      if (from) filter.scheduledAt.$gte = from;
+      if (to) filter.scheduledAt.$lte = to;
+    }
+    return OrderModel.countDocuments(filter);
+  }
+
   static findCustomerTimeline(
     customerId: Types.ObjectId | string,
     page = 1,

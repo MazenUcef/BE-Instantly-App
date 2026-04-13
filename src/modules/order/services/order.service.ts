@@ -637,6 +637,76 @@ export class OrderService {
     };
   }
 
+  static async getScheduledOrders(input: {
+    userId: string;
+    role: string;
+    page?: number;
+    limit?: number;
+    from?: string;
+    to?: string;
+  }) {
+    const { userId, role, page = 1, limit = 20, from, to } = input;
+
+    if (role !== "customer" && role !== "supplier") {
+      throw new AppError("Not allowed", 403);
+    }
+
+    const fromDate = from ? new Date(from) : null;
+    const toDate = to ? new Date(to) : null;
+    if (fromDate && isNaN(fromDate.getTime())) {
+      throw new AppError("Invalid 'from' date", 400);
+    }
+    if (toDate && isNaN(toDate.getTime())) {
+      throw new AppError("Invalid 'to' date", 400);
+    }
+
+    const [orders, total] = await Promise.all([
+      OrderRepository.findScheduledOrdersForUser({
+        userId,
+        role,
+        from: fromDate,
+        to: toDate,
+        page,
+        limit,
+      }),
+      OrderRepository.countScheduledOrdersForUser({
+        userId,
+        role,
+        from: fromDate,
+        to: toDate,
+      }),
+    ]);
+
+    const orderIds = orders.map((o: any) => o._id);
+    const acceptedOffers = orderIds.length
+      ? await OfferModel.find({
+          orderId: { $in: orderIds },
+          status: OFFER_STATUS.ACCEPTED,
+        }).lean()
+      : [];
+    const offerByOrderId = new Map<string, any>();
+    for (const off of acceptedOffers) {
+      offerByOrderId.set(String(off.orderId), off);
+    }
+
+    const data = orders.map((o: any) => ({
+      ...o,
+      offer: offerByOrderId.get(String(o._id)) || null,
+    }));
+
+    return {
+      success: true,
+      data,
+      meta: {
+        page,
+        limit,
+        total,
+        count: data.length,
+        hasNextPage: page * limit < total,
+      },
+    };
+  }
+
   static async checkPendingOrders(input: { userId: string }) {
     const { userId } = input;
 
