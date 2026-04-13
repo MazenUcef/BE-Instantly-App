@@ -1,6 +1,7 @@
 import UserModel from "../../auth/models/User.model";
 import bundleBookingModel from "../../bundleBooking/models/bundleBooking.model";
 import orderModel from "../../order/models/Order.model";
+import offerModel from "../../offer/models/Offer.model";
 import { AppError } from "../../../shared/middlewares/errorHandler";
 import {
   ACTIVE_BOOKING_STATUSES,
@@ -57,20 +58,48 @@ export class AvailabilityService {
         .find({
           supplierId,
           status: { $in: ["scheduled", "in_progress"] },
-          scheduledAt: { $gte: monthStart, $lte: monthEnd },
+          scheduledAt: { $lte: monthEnd },
         })
+        .populate("customerId", "firstName lastName email phoneNumber profilePicture address")
+        .populate("categoryId", "name nameAr")
+        .populate("governmentId", "name nameAr")
         .lean(),
     ]);
 
+    const orderIds = scheduledOrders.map((o) => o._id);
+    const acceptedOffers = orderIds.length
+      ? await offerModel
+          .find({ orderId: { $in: orderIds }, status: "accepted" })
+          .lean()
+      : [];
+    const offerByOrderId = new Map<string, any>();
+    for (const off of acceptedOffers) {
+      offerByOrderId.set(String(off.orderId), off);
+    }
+
     const busyDates = new Set<string>();
+    const ordersByDate: Record<string, any[]> = {};
 
     for (const booking of bookings) {
       busyDates.add(String(booking.bookedDate));
     }
 
     for (const order of scheduledOrders) {
-      if (order.scheduledAt) {
-        busyDates.add(getDateOnly(order.scheduledAt));
+      if (!order.scheduledAt) continue;
+      const days = Math.max(1, order.expectedDays || 1);
+      const start = new Date(order.scheduledAt);
+      const orderWithOffer = {
+        ...order,
+        offer: offerByOrderId.get(String(order._id)) || null,
+      };
+      for (let i = 0; i < days; i++) {
+        const d = new Date(start);
+        d.setUTCDate(d.getUTCDate() + i);
+        if (d < monthStart || d > monthEnd) continue;
+        const dateStr = getDateOnly(d);
+        busyDates.add(dateStr);
+        if (!ordersByDate[dateStr]) ordersByDate[dateStr] = [];
+        ordersByDate[dateStr].push(orderWithOffer);
       }
     }
 
@@ -85,6 +114,7 @@ export class AvailabilityService {
       success: true,
       month,
       days,
+      ordersByDate,
     };
   }
 
@@ -114,33 +144,64 @@ export class AvailabilityService {
         .find({
           supplierId,
           status: { $in: ["scheduled", "in_progress"] },
-          scheduledAt: { $gte: dayStart, $lte: dayEnd },
+          scheduledAt: { $lte: dayEnd },
         })
+        .populate("customerId", "firstName lastName email phoneNumber profilePicture address")
+        .populate("categoryId", "name nameAr")
+        .populate("governmentId", "name nameAr")
         .lean(),
     ]);
 
-    const bookedTimes: { start: string; end: string; type: "booking" | "order" }[] = [];
+    const orderIds = scheduledOrders.map((o) => o._id);
+    const acceptedOffers = orderIds.length
+      ? await offerModel
+          .find({ orderId: { $in: orderIds }, status: "accepted" })
+          .lean()
+      : [];
+    const offerByOrderId = new Map<string, any>();
+    for (const off of acceptedOffers) {
+      offerByOrderId.set(String(off.orderId), off);
+    }
+
+    const bookedTimes: {
+      start: string;
+      end: string;
+      type: "booking" | "order";
+      order?: any;
+      booking?: any;
+    }[] = [];
 
     for (const booking of bookings) {
       bookedTimes.push({
         start: booking.slotStart,
         end: booking.slotEnd,
         type: "booking",
+        booking,
       });
     }
 
     for (const order of scheduledOrders) {
       if (!order.scheduledAt) continue;
       const startDate = new Date(order.scheduledAt);
-      const startMinutes = startDate.getHours() * 60 + startDate.getMinutes();
+      const days = Math.max(1, order.expectedDays || 1);
+      const endDate = new Date(startDate);
+      endDate.setUTCDate(endDate.getUTCDate() + days);
+      if (endDate <= dayStart || startDate > dayEnd) continue;
+
+      const startMinutes =
+        startDate.getUTCHours() * 60 + startDate.getUTCMinutes();
       const duration =
         order.estimatedDuration || DEFAULT_ACCEPTED_JOB_DURATION_MINUTES;
-      const endMinutes = startMinutes + duration;
+      const endMinutes = Math.min(startMinutes + duration, 24 * 60);
 
       bookedTimes.push({
         start: minutesToTime(startMinutes),
         end: minutesToTime(endMinutes),
         type: "order",
+        order: {
+          ...order,
+          offer: offerByOrderId.get(String(order._id)) || null,
+        },
       });
     }
 
