@@ -17,29 +17,32 @@ function normalizeDailyStart(input: Date | string): Date {
 }
 
 function resolveOfferSchedule(
-  orderType: string,
+  order: { orderType: string; timeToStart?: Date | string | null },
   input: {
     timeToStart?: Date | string | null;
     estimatedDuration?: number | null;
-    numberOfDays?: number | null;
+    expectedDays?: number | null;
   },
-): { timeToStart: Date; estimatedDuration: number; numberOfDays: number | null } {
-  if (!input.timeToStart) {
-    throw new AppError("timeToStart is required", 400);
-  }
-
-  if (orderType === ORDER_TYPE.DAILY) {
-    if (!input.numberOfDays || input.numberOfDays < 1) {
+): { timeToStart: Date; estimatedDuration: number; expectedDays: number | null } {
+  if (order.orderType === ORDER_TYPE.DAILY) {
+    if (!input.timeToStart) {
+      throw new AppError("timeToStart is required for daily orders", 400);
+    }
+    if (!input.expectedDays || input.expectedDays < 1) {
       throw new AppError(
-        "numberOfDays is required for daily orders and must be >= 1",
+        "expectedDays is required for daily orders and must be >= 1",
         400,
       );
     }
     return {
       timeToStart: normalizeDailyStart(input.timeToStart),
       estimatedDuration: DAILY_DURATION_MINUTES,
-      numberOfDays: input.numberOfDays,
+      expectedDays: input.expectedDays,
     };
+  }
+
+  if (!input.timeToStart) {
+    throw new AppError("timeToStart is required for contract orders", 400);
   }
 
   if (!input.estimatedDuration || input.estimatedDuration < 1) {
@@ -52,7 +55,7 @@ function resolveOfferSchedule(
   return {
     timeToStart: new Date(input.timeToStart),
     estimatedDuration: input.estimatedDuration,
-    numberOfDays: null,
+    expectedDays: null,
   };
 }
 import { OFFER_STATUS } from "../../../shared/constants/offer.constants";
@@ -228,7 +231,7 @@ export class OfferService {
     orderId: string;
     amount: number;
     estimatedDuration?: number | null;
-    numberOfDays?: number | null;
+    expectedDays?: number | null;
     timeToStart?: string | Date | null;
   }) {
     const { supplierId, orderId, amount } = input;
@@ -262,10 +265,10 @@ export class OfferService {
           );
         }
 
-        const schedule = resolveOfferSchedule(order.orderType, {
+        const schedule = resolveOfferSchedule(order, {
           timeToStart: input.timeToStart,
           estimatedDuration: input.estimatedDuration,
-          numberOfDays: input.numberOfDays,
+          expectedDays: input.expectedDays,
         });
 
         if (schedule.timeToStart > new Date()) {
@@ -297,7 +300,7 @@ export class OfferService {
             {
               amount,
               estimatedDuration: schedule.estimatedDuration,
-              numberOfDays: schedule.numberOfDays,
+              expectedDays: schedule.expectedDays,
               timeToStart: schedule.timeToStart,
               expiresAt: null,
             },
@@ -311,7 +314,7 @@ export class OfferService {
               supplierId,
               amount,
               estimatedDuration: schedule.estimatedDuration,
-              numberOfDays: schedule.numberOfDays,
+              expectedDays: schedule.expectedDays,
               timeToStart: schedule.timeToStart,
               expiresAt: null,
               status: OFFER_STATUS.PENDING,
@@ -1012,10 +1015,10 @@ export class OfferService {
           throw new AppError("Order is missing timeToStart", 400);
         }
 
-        const schedule = resolveOfferSchedule(order.orderType, {
+        const schedule = resolveOfferSchedule(order, {
           timeToStart: order.timeToStart,
           estimatedDuration: order.estimatedDuration,
-          numberOfDays: order.expectedDays,
+          expectedDays: order.expectedDays,
         });
 
         supplierPendingOffers =
@@ -1031,7 +1034,7 @@ export class OfferService {
             amount: order.requestedPrice,
             timeToStart: schedule.timeToStart,
             estimatedDuration: schedule.estimatedDuration,
-            numberOfDays: schedule.numberOfDays,
+            expectedDays: schedule.expectedDays,
             status: OFFER_STATUS.ACCEPTED,
           },
           dbSession,

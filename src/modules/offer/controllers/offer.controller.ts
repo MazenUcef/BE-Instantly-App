@@ -7,8 +7,8 @@ export const createOffer = async (req: any, res: Response) => {
     orderId: req.body.orderId,
     amount: Number(req.body.amount),
     estimatedDuration: req.body.estimatedDuration ? Number(req.body.estimatedDuration) : null,
-    numberOfDays: req.body.numberOfDays ? Number(req.body.numberOfDays) : null,
-    timeToStart: req.body.timeToStart,
+    expectedDays: req.body.expectedDays ? Number(req.body.expectedDays) : null,
+    timeToStart: req.body.timeToStart ?? null,
   });
 
   return res.status(result.created ? 201 : 200).json(result);

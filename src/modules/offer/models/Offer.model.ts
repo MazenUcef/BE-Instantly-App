@@ -9,7 +9,7 @@ export interface IOffer extends Document {
   supplierId: Types.ObjectId;
   amount: number;
   estimatedDuration?: number | null;
-  numberOfDays?: number | null;
+  expectedDays?: number | null;
   timeToStart?: Date | null;
   status: OfferStatus;
   expiresAt?: Date | null;
@@ -45,10 +45,11 @@ const offerSchema = new Schema<IOffer>(
       default: null,
       min: 1,
     },
-    numberOfDays: {
+    expectedDays: {
       type: Number,
       default: null,
       min: 1,
+      max: 365,
     },
     timeToStart: {
       type: Date,

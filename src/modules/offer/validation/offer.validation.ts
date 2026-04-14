@@ -32,14 +32,12 @@ export const validateCreateOffer: RequestHandler[] = [
     .optional({ nullable: true })
     .isInt({ min: 1 })
     .withMessage("estimatedDuration must be an integer >= 1 minute"),
-  body("numberOfDays")
+  body("expectedDays")
     .optional({ nullable: true })
-    .isInt({ min: 1 })
-    .withMessage("numberOfDays must be an integer >= 1"),
+    .isInt({ min: 1, max: 365 })
+    .withMessage("expectedDays must be an integer between 1 and 365"),
   body("timeToStart")
-    .notEmpty()
-    .withMessage("timeToStart is required")
-    .bail()
+    .optional({ nullable: true })
     .isISO8601()
     .withMessage("timeToStart must be a valid ISO date"),
   handleValidationErrors,
