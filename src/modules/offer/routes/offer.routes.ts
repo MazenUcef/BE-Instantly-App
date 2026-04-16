@@ -13,6 +13,7 @@ import {
 import {
   validateAcceptOrderDirect,
   validateCreateOffer,
+  validateDeleteOffer,
   validateOfferHistoryQuery,
   validateOfferIdParam,
   validateOrderIdParam,
@@ -63,7 +64,7 @@ router.delete(
   "/:id",
   authenticate,
   authorize("supplier"),
-  validateOfferIdParam,
+  validateDeleteOffer,
   deleteOffer,
 );
 

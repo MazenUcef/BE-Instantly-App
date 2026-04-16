@@ -1,31 +1,38 @@
-import { ClientSession, Types } from "mongoose";
-import GovernmentModel from "../models/Government.model";
+import { Prisma } from "@prisma/client";
+import prisma from "../../../shared/config/prisma";
+
+type Tx = Prisma.TransactionClient;
 
 export class GovernmentRepository {
-  static findActive(session?: ClientSession) {
-    return GovernmentModel.find({ isActive: true })
-      .sort({ order: 1, name: 1 })
-      .session(session || null);
+  static findActive(tx?: Tx) {
+    return (tx ?? prisma).government.findMany({
+      where: { isActive: true },
+      orderBy: [{ order: "asc" }, { name: "asc" }],
+    });
   }
 
-  static findAll(session?: ClientSession) {
-    return GovernmentModel.find()
-      .sort({ order: 1, name: 1 })
-      .session(session || null);
+  static findAll(tx?: Tx) {
+    return (tx ?? prisma).government.findMany({
+      orderBy: [{ order: "asc" }, { name: "asc" }],
+    });
   }
 
-  static findById(governmentId: string | Types.ObjectId, session?: ClientSession) {
-    return GovernmentModel.findById(governmentId).session(session || null);
+  static findById(governmentId: string, tx?: Tx) {
+    return (tx ?? prisma).government.findUnique({
+      where: { id: governmentId },
+    });
   }
 
   static findByNormalizedNames(
     normalizedName: string,
     normalizedNameAr: string,
-    session?: ClientSession,
+    tx?: Tx,
   ) {
-    return GovernmentModel.findOne({
-      $or: [{ normalizedName }, { normalizedNameAr }],
-    }).session(session || null);
+    return (tx ?? prisma).government.findFirst({
+      where: {
+        OR: [{ normalizedName }, { normalizedNameAr }],
+      },
+    });
   }
 
   static create(
@@ -38,20 +45,19 @@ export class GovernmentRepository {
       isActive?: boolean;
       order?: number;
     },
-    session?: ClientSession,
+    tx?: Tx,
   ) {
-    return GovernmentModel.create([data], { session }).then((docs: any[]) => docs[0]);
+    return (tx ?? prisma).government.create({ data });
   }
 
   static updateById(
-    governmentId: string | Types.ObjectId,
-    updates: Record<string, any>,
-    session?: ClientSession,
+    governmentId: string,
+    updates: Prisma.GovernmentUpdateInput,
+    tx?: Tx,
   ) {
-    return GovernmentModel.findByIdAndUpdate(governmentId, updates, {
-      new: true,
-      runValidators: true,
-      session,
+    return (tx ?? prisma).government.update({
+      where: { id: governmentId },
+      data: updates,
     });
   }
 }

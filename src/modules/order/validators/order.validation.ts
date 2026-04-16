@@ -28,8 +28,8 @@ export const validateCreateOrder: RequestHandler[] = [
   ]),
   body("address").notEmpty().isString().trim().isLength({ min: 3, max: 500 }),
   body("description").notEmpty().isString().trim().isLength({ min: 3, max: 5000 }),
-  body("categoryId").notEmpty().isMongoId().withMessage("Valid categoryId is required"),
-  body("governmentId").notEmpty().isMongoId().withMessage("Valid governmentId is required"),
+  body("categoryId").notEmpty().isUUID().withMessage("Valid categoryId is required"),
+  body("governmentId").notEmpty().isUUID().withMessage("Valid governmentId is required"),
   body("jobTitle").notEmpty().isString().trim().isLength({ min: 1, max: 200 }),
   body("requestedPrice").notEmpty().isFloat({ min: 1 }).withMessage("requestedPrice must be >= 1"),
   body("orderType")
@@ -49,7 +49,14 @@ export const validateCreateOrder: RequestHandler[] = [
     .withMessage("timeToStart is required")
     .bail()
     .isISO8601()
-    .withMessage("timeToStart must be a valid ISO date"),
+    .withMessage("timeToStart must be a valid ISO date")
+    .bail()
+    .custom((value) => {
+      if (new Date(value) <= new Date()) {
+        throw new Error("timeToStart must be in the future");
+      }
+      return true;
+    }),
   body("expectedDays")
     .if(body("orderType").equals(ORDER_TYPE.DAILY))
     .notEmpty()
@@ -80,12 +87,12 @@ export const validateCreateOrder: RequestHandler[] = [
 ];
 
 export const validateOrderIdParam: RequestHandler[] = [
-  param("id").isMongoId().withMessage("Invalid order id"),
+  param("id").isUUID().withMessage("Invalid order id"),
   handleValidationErrors,
 ];
 
 export const validateUpdateOrderPrice: RequestHandler[] = [
-  param("id").isMongoId().withMessage("Invalid order id"),
+  param("id").isUUID().withMessage("Invalid order id"),
   body("requestedPrice").notEmpty().isFloat({ min: 1 }).withMessage("requestedPrice must be >= 1"),
   handleValidationErrors,
 ];

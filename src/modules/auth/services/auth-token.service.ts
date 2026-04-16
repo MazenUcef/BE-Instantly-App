@@ -7,12 +7,16 @@ import {
 
 export class AuthTokenService {
   static buildPayload(user: any, sessionId: string) {
+    const governmentIds = Array.isArray(user.governments)
+      ? user.governments.map((g: any) => g.governmentId)
+      : user.governmentIds || [];
+
     return {
-      userId: user._id.toString(),
+      userId: user.id,
       role: user.role,
       name: `${user.firstName} ${user.lastName}`,
       categoryId: user.categoryId || null,
-      governmentIds: user.governmentIds || [],
+      governmentIds,
       sessionId,
     };
   }
@@ -25,7 +29,7 @@ export class AuthTokenService {
     const refreshToken = generateRefreshToken(payload);
 
     await redis.set(
-      `refresh:${user._id}:${sessionId}`,
+      `refresh:${user.id}:${sessionId}`,
       refreshToken,
       "EX",
       7 * 24 * 60 * 60,

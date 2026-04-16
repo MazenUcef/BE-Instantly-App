@@ -1,112 +1,135 @@
-import { ClientSession, Types } from "mongoose";
-import { ORDER_STATUS } from "../../../shared/constants/order.constants";
-import OrderModel from "../models/Order.model";
+import { OrderStatus, OrderType, Prisma } from "@prisma/client";
+import prisma from "../../../shared/config/prisma";
+
+type Tx = Prisma.TransactionClient;
+
+const userSelect = {
+  id: true,
+  firstName: true,
+  lastName: true,
+  email: true,
+  phoneNumber: true,
+  profilePicture: true,
+  address: true,
+} as const;
+
+const taxonomySelect = { id: true, name: true, nameAr: true } as const;
+const categorySelect = { id: true, name: true } as const;
 
 export class OrderRepository {
   static createOrder(
     data: {
-      customerId: Types.ObjectId | string;
+      customerId: string;
       customerName: string;
-      categoryId: Types.ObjectId | string;
-      governmentId: Types.ObjectId | string;
+      categoryId: string;
+      governmentId: string;
       jobTitle: string;
       address: string;
       description: string;
       requestedPrice: number;
-      orderType: string;
+      orderType: OrderType;
       selectedWorkflow: string;
       expectedDays?: number | null;
       estimatedDuration?: number | null;
       timeToStart?: Date | string | null;
       images?: { url: string; publicId: string }[];
       files?: { url: string; publicId: string; originalName: string }[];
-      status?: string;
+      status?: OrderStatus;
     },
-    session?: ClientSession,
+    tx?: Tx,
   ) {
-    return OrderModel.create([data], { session }).then((docs: any[]) => docs[0]);
+    return (tx ?? prisma).order.create({
+      data: {
+        customerId: data.customerId,
+        customerName: data.customerName,
+        categoryId: data.categoryId,
+        governmentId: data.governmentId,
+        jobTitle: data.jobTitle,
+        address: data.address,
+        description: data.description,
+        requestedPrice: new Prisma.Decimal(data.requestedPrice),
+        orderType: data.orderType,
+        selectedWorkflow: data.selectedWorkflow,
+        expectedDays: data.expectedDays ?? null,
+        estimatedDuration: data.estimatedDuration ?? null,
+        timeToStart: data.timeToStart ? new Date(data.timeToStart) : null,
+        images: (data.images ?? []) as unknown as Prisma.InputJsonValue,
+        files: (data.files ?? []) as unknown as Prisma.InputJsonValue,
+        status: data.status ?? OrderStatus.pending,
+      },
+    });
   }
 
-  static findCustomerPendingOrder(
-    customerId: Types.ObjectId | string,
-    session?: ClientSession,
-  ) {
-    return OrderModel.findOne({
-      customerId,
-      status: ORDER_STATUS.PENDING,
-    }).session(session || null);
+  static findCustomerPendingOrder(customerId: string, tx?: Tx) {
+    return (tx ?? prisma).order.findFirst({
+      where: { customerId, status: OrderStatus.pending },
+    });
   }
 
-  static findCustomerInProgressOrder(
-    customerId: Types.ObjectId | string,
-    session?: ClientSession,
-  ) {
-    return OrderModel.findOne({
-      customerId,
-      status: ORDER_STATUS.IN_PROGRESS,
-    }).session(session || null);
+  static findCustomerInProgressOrder(customerId: string, tx?: Tx) {
+    return (tx ?? prisma).order.findFirst({
+      where: { customerId, status: OrderStatus.in_progress },
+    });
   }
 
-  static markScheduled(
-    orderId: Types.ObjectId | string,
-    supplierId: Types.ObjectId | string,
+  static async markScheduled(
+    orderId: string,
+    supplierId: string,
     finalPrice: number,
     scheduledAt: Date,
     estimatedDuration: number | null,
-    session?: ClientSession,
+    tx?: Tx,
   ) {
-    return OrderModel.findOneAndUpdate(
-      { _id: orderId, status: ORDER_STATUS.PENDING },
-      {
-        $set: {
-          status: ORDER_STATUS.SCHEDULED,
-          supplierId,
-          finalPrice,
-          scheduledAt,
-          estimatedDuration,
-        },
+    const client = tx ?? prisma;
+    const res = await client.order.updateMany({
+      where: { id: orderId, status: OrderStatus.pending },
+      data: {
+        status: OrderStatus.scheduled,
+        supplierId,
+        finalPrice: new Prisma.Decimal(finalPrice),
+        scheduledAt,
+        estimatedDuration,
       },
-      { new: true, session },
-    );
+    });
+    if (res.count === 0) return null;
+    return client.order.findUnique({ where: { id: orderId } });
   }
 
-  static findDueScheduledOrders(session?: ClientSession) {
-    return OrderModel.find({
-      status: ORDER_STATUS.SCHEDULED,
-      scheduledAt: { $lte: new Date() },
-    }).session(session || null);
+  static findDueScheduledOrders(tx?: Tx) {
+    return (tx ?? prisma).order.findMany({
+      where: {
+        status: OrderStatus.scheduled,
+        scheduledAt: { lte: new Date() },
+      },
+    });
   }
 
-  static findCustomerScheduledWindows(
-    customerId: Types.ObjectId | string,
-    session?: ClientSession,
-  ) {
-    return OrderModel.find({
-      customerId,
-      status: { $in: [ORDER_STATUS.SCHEDULED, ORDER_STATUS.IN_PROGRESS] },
-      scheduledAt: { $ne: null },
-      estimatedDuration: { $ne: null },
-    })
-      .select("scheduledAt estimatedDuration")
-      .session(session || null);
+  static findCustomerScheduledWindows(customerId: string, tx?: Tx) {
+    return (tx ?? prisma).order.findMany({
+      where: {
+        customerId,
+        status: { in: [OrderStatus.scheduled, OrderStatus.in_progress] },
+        scheduledAt: { not: null },
+        estimatedDuration: { not: null },
+      },
+      select: { id: true, scheduledAt: true, estimatedDuration: true },
+    });
   }
 
-  static findSupplierScheduledWindows(
-    supplierId: Types.ObjectId | string,
-    session?: ClientSession,
-  ) {
-    return OrderModel.find({
-      supplierId,
-      status: { $in: [ORDER_STATUS.SCHEDULED, ORDER_STATUS.IN_PROGRESS] },
-      scheduledAt: { $ne: null },
-      estimatedDuration: { $ne: null },
-    })
-      .select("scheduledAt estimatedDuration")
-      .session(session || null);
+  static findSupplierScheduledWindows(supplierId: string, tx?: Tx) {
+    return (tx ?? prisma).order.findMany({
+      where: {
+        supplierId,
+        status: { in: [OrderStatus.scheduled, OrderStatus.in_progress] },
+        scheduledAt: { not: null },
+        estimatedDuration: { not: null },
+      },
+      select: { id: true, scheduledAt: true, estimatedDuration: true },
+    });
   }
 
   static findScheduledOrdersForUser(input: {
-    userId: Types.ObjectId | string;
+    userId: string;
     role: "customer" | "supplier";
     from?: Date | null;
     to?: Date | null;
@@ -114,241 +137,209 @@ export class OrderRepository {
     limit?: number;
   }) {
     const { userId, role, from, to, page = 1, limit = 20 } = input;
-    const filter: any = { status: ORDER_STATUS.SCHEDULED };
-    if (role === "customer") filter.customerId = userId;
-    else filter.supplierId = userId;
-
+    const where: Prisma.OrderWhereInput = {
+      status: OrderStatus.scheduled,
+      ...(role === "customer" ? { customerId: userId } : { supplierId: userId }),
+    };
     if (from || to) {
-      filter.scheduledAt = {};
-      if (from) filter.scheduledAt.$gte = from;
-      if (to) filter.scheduledAt.$lte = to;
+      where.scheduledAt = {};
+      if (from) (where.scheduledAt as any).gte = from;
+      if (to) (where.scheduledAt as any).lte = to;
     }
 
-    const skip = (page - 1) * limit;
-    return OrderModel.find(filter)
-      .sort({ scheduledAt: 1, createdAt: -1 })
-      .skip(skip)
-      .limit(limit)
-      .populate(
-        "customerId",
-        "firstName lastName email phoneNumber profilePicture address",
-      )
-      .populate(
-        "supplierId",
-        "firstName lastName email phoneNumber profilePicture address",
-      )
-      .populate("categoryId", "name nameAr")
-      .populate("governmentId", "name nameAr")
-      .lean();
+    return prisma.order.findMany({
+      where,
+      orderBy: [{ scheduledAt: "asc" }, { createdAt: "desc" }],
+      skip: (page - 1) * limit,
+      take: limit,
+      include: {
+        customer: { select: userSelect },
+        supplier: { select: userSelect },
+        category: { select: categorySelect },
+        government: { select: taxonomySelect },
+      },
+    });
   }
 
   static countScheduledOrdersForUser(input: {
-    userId: Types.ObjectId | string;
+    userId: string;
     role: "customer" | "supplier";
     from?: Date | null;
     to?: Date | null;
   }) {
     const { userId, role, from, to } = input;
-    const filter: any = { status: ORDER_STATUS.SCHEDULED };
-    if (role === "customer") filter.customerId = userId;
-    else filter.supplierId = userId;
+    const where: Prisma.OrderWhereInput = {
+      status: OrderStatus.scheduled,
+      ...(role === "customer" ? { customerId: userId } : { supplierId: userId }),
+    };
     if (from || to) {
-      filter.scheduledAt = {};
-      if (from) filter.scheduledAt.$gte = from;
-      if (to) filter.scheduledAt.$lte = to;
+      where.scheduledAt = {};
+      if (from) (where.scheduledAt as any).gte = from;
+      if (to) (where.scheduledAt as any).lte = to;
     }
-    return OrderModel.countDocuments(filter);
+    return prisma.order.count({ where });
   }
 
-  static findCustomerTimeline(
-    customerId: Types.ObjectId | string,
-    page = 1,
-    limit = 20,
-  ) {
-    const skip = (page - 1) * limit;
-    return OrderModel.find({ customerId })
-      .sort({ scheduledAt: 1, timeToStart: 1, createdAt: -1 })
-      .skip(skip)
-      .limit(limit);
+  static findCustomerTimeline(customerId: string, page = 1, limit = 20) {
+    return prisma.order.findMany({
+      where: { customerId },
+      orderBy: [
+        { scheduledAt: "asc" },
+        { timeToStart: "asc" },
+        { createdAt: "desc" },
+      ],
+      skip: (page - 1) * limit,
+      take: limit,
+    });
   }
 
-  static countCustomerTimeline(customerId: Types.ObjectId | string) {
-    return OrderModel.countDocuments({ customerId });
+  static countCustomerTimeline(customerId: string) {
+    return prisma.order.count({ where: { customerId } });
   }
 
-  static findById(orderId: Types.ObjectId | string, session?: ClientSession) {
-    return OrderModel.findById(orderId).session(session || null);
+  static findById(orderId: string, tx?: Tx) {
+    return (tx ?? prisma).order.findUnique({ where: { id: orderId } });
   }
 
-  static findCustomerActiveOrder(
-    customerId: Types.ObjectId | string,
-    session?: ClientSession,
-  ) {
-    return OrderModel.findOne({
-      customerId,
-      status: { $in: [ORDER_STATUS.PENDING, ORDER_STATUS.SCHEDULED, ORDER_STATUS.IN_PROGRESS] },
-    })
-      .sort({ createdAt: -1 })
-      .session(session || null);
-  }
-
-  static findCustomerPendingReviewOrder(
-    customerId: Types.ObjectId | string,
-    session?: ClientSession,
-  ) {
-    return OrderModel.findOne({
-      customerId,
-      status: ORDER_STATUS.COMPLETED,
-      customerReviewed: false,
-    })
-      .sort({ createdAt: -1 })
-      .session(session || null);
-  }
-
-  static updateRequestedPrice(
-    orderId: Types.ObjectId | string,
-    requestedPrice: number,
-    session?: ClientSession,
-  ) {
-    return OrderModel.findOneAndUpdate(
-      {
-        _id: orderId,
-        status: ORDER_STATUS.PENDING,
+  static findCustomerActiveOrder(customerId: string, tx?: Tx) {
+    return (tx ?? prisma).order.findFirst({
+      where: {
+        customerId,
+        status: {
+          in: [OrderStatus.pending, OrderStatus.scheduled, OrderStatus.in_progress],
+        },
       },
-      {
-        $set: { requestedPrice },
-      },
-      { new: true, session },
-    );
+      orderBy: { createdAt: "desc" },
+    });
   }
 
-  static markCancelled(
+  static findCustomerPendingReviewOrder(customerId: string, tx?: Tx) {
+    return (tx ?? prisma).order.findFirst({
+      where: {
+        customerId,
+        status: OrderStatus.completed,
+        customerReviewed: false,
+      },
+      orderBy: { createdAt: "desc" },
+    });
+  }
+
+  static async updateRequestedPrice(orderId: string, requestedPrice: number, tx?: Tx) {
+    const client = tx ?? prisma;
+    const res = await client.order.updateMany({
+      where: { id: orderId, status: OrderStatus.pending },
+      data: { requestedPrice: new Prisma.Decimal(requestedPrice) },
+    });
+    if (res.count === 0) return null;
+    return client.order.findUnique({ where: { id: orderId } });
+  }
+
+  static async markCancelled(
     input: {
-      orderId: Types.ObjectId | string;
-      customerId?: Types.ObjectId | string;
-      cancelledBy: string;
+      orderId: string;
+      customerId?: string;
+      cancelledBy: any;
       cancellationReason?: string | null;
     },
-    session?: ClientSession,
+    tx?: Tx,
   ) {
-    const filter: any = {
-      _id: input.orderId,
-      status: { $in: [ORDER_STATUS.PENDING, ORDER_STATUS.SCHEDULED, ORDER_STATUS.IN_PROGRESS] },
+    const client = tx ?? prisma;
+    const where: Prisma.OrderWhereInput = {
+      id: input.orderId,
+      status: {
+        in: [OrderStatus.pending, OrderStatus.scheduled, OrderStatus.in_progress],
+      },
+      ...(input.customerId ? { customerId: input.customerId } : {}),
     };
-
-    if (input.customerId) {
-      filter.customerId = input.customerId;
-    }
-
-    return OrderModel.findOneAndUpdate(
-      filter,
-      {
-        $set: {
-          status: ORDER_STATUS.CANCELLED,
-          cancelledBy: input.cancelledBy,
-          cancellationReason: input.cancellationReason || null,
-          cancelledAt: new Date(),
-        },
+    const res = await client.order.updateMany({
+      where,
+      data: {
+        status: OrderStatus.cancelled,
+        cancelledBy: input.cancelledBy,
+        cancellationReason: input.cancellationReason ?? null,
+        cancelledAt: new Date(),
       },
-      { new: true, session },
-    );
+    });
+    if (res.count === 0) return null;
+    return client.order.findUnique({ where: { id: input.orderId } });
   }
 
-  static markInProgress(
-    orderId: Types.ObjectId | string,
-    supplierId: Types.ObjectId | string,
+  static async markInProgress(
+    orderId: string,
+    supplierId: string,
     finalPrice: number,
-    session?: ClientSession,
+    tx?: Tx,
   ) {
-    return OrderModel.findOneAndUpdate(
-      {
-        _id: orderId,
-        status: ORDER_STATUS.PENDING,
+    const client = tx ?? prisma;
+    const res = await client.order.updateMany({
+      where: { id: orderId, status: OrderStatus.pending },
+      data: {
+        status: OrderStatus.in_progress,
+        supplierId,
+        finalPrice: new Prisma.Decimal(finalPrice),
       },
-      {
-        $set: {
-          status: ORDER_STATUS.IN_PROGRESS,
-          supplierId,
-          finalPrice,
-        },
-      },
-      { new: true, session },
-    );
+    });
+    if (res.count === 0) return null;
+    return client.order.findUnique({ where: { id: orderId } });
   }
 
-  static markCompleted(
-    orderId: Types.ObjectId | string,
-    session?: ClientSession,
-  ) {
-    return OrderModel.findOneAndUpdate(
-      {
-        _id: orderId,
-        status: ORDER_STATUS.IN_PROGRESS,
-      },
-      {
-        $set: {
-          status: ORDER_STATUS.COMPLETED,
-          completedAt: new Date(),
-        },
-      },
-      { new: true, session },
-    );
+  static async markCompleted(orderId: string, tx?: Tx) {
+    const client = tx ?? prisma;
+    const res = await client.order.updateMany({
+      where: { id: orderId, status: OrderStatus.in_progress },
+      data: { status: OrderStatus.completed, completedAt: new Date() },
+    });
+    if (res.count === 0) return null;
+    return client.order.findUnique({ where: { id: orderId } });
   }
 
-  static findCustomerOrders(
-    customerId: Types.ObjectId | string,
-    page = 1,
-    limit = 20,
-  ) {
-    const skip = (page - 1) * limit;
-
-    return OrderModel.find({ customerId })
-      .sort({ createdAt: -1 })
-      .skip(skip)
-      .limit(limit);
+  static findCustomerOrders(customerId: string, page = 1, limit = 20) {
+    return prisma.order.findMany({
+      where: { customerId },
+      orderBy: { createdAt: "desc" },
+      skip: (page - 1) * limit,
+      take: limit,
+    });
   }
 
-  static countCustomerOrders(customerId: Types.ObjectId | string) {
-    return OrderModel.countDocuments({ customerId });
+  static countCustomerOrders(customerId: string) {
+    return prisma.order.count({ where: { customerId } });
   }
 
-  static resetToPending(
-    orderId: Types.ObjectId | string,
-    session?: ClientSession,
-  ) {
-    return OrderModel.findOneAndUpdate(
-      {
-        _id: orderId,
-        status: { $in: [ORDER_STATUS.IN_PROGRESS, ORDER_STATUS.SCHEDULED] },
+  static async resetToPending(orderId: string, tx?: Tx) {
+    const client = tx ?? prisma;
+    const res = await client.order.updateMany({
+      where: {
+        id: orderId,
+        status: { in: [OrderStatus.in_progress, OrderStatus.scheduled] },
       },
-      {
-        $set: {
-          status: ORDER_STATUS.PENDING,
-          supplierId: null,
-          finalPrice: null,
-          scheduledAt: null,
-          estimatedDuration: null,
-        },
+      data: {
+        status: OrderStatus.pending,
+        supplierId: null,
+        finalPrice: null,
+        scheduledAt: null,
+        estimatedDuration: null,
       },
-      { new: true, session },
-    );
+    });
+    if (res.count === 0) return null;
+    return client.order.findUnique({ where: { id: orderId } });
   }
 
   static findPendingOrdersForSupplierFeed(input: {
-    categoryId: Types.ObjectId | string;
-    governmentIds: (Types.ObjectId | string)[];
-    excludeCustomerId?: Types.ObjectId | string;
+    categoryId: string;
+    governmentIds: string[];
+    excludeCustomerId?: string;
   }) {
-    const query: any = {
-      categoryId: input.categoryId,
-      governmentId: { $in: input.governmentIds },
-      status: ORDER_STATUS.PENDING,
-    };
-
-    if (input.excludeCustomerId) {
-      query.customerId = { $ne: input.excludeCustomerId };
-    }
-
-    return OrderModel.find(query).sort({ createdAt: -1 });
+    return prisma.order.findMany({
+      where: {
+        categoryId: input.categoryId,
+        governmentId: { in: input.governmentIds },
+        status: OrderStatus.pending,
+        ...(input.excludeCustomerId
+          ? { NOT: { customerId: input.excludeCustomerId } }
+          : {}),
+      },
+      orderBy: { createdAt: "desc" },
+    });
   }
 }

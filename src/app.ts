@@ -20,6 +20,7 @@ import bundleRoutes from './modules/bundle/routes/bundle.routes';
 import bundleBookingRoutes from './modules/bundleBooking/routes/bundleBooking.routes';
 import callRoutes from './modules/call/routes/call.routes';
 import governmentRoutes from './modules/government/routes/Government.routes'
+import { errorHandler } from './shared/middlewares/errorHandler';
 
 dotenv.config();
 
@@ -75,15 +76,6 @@ app.use("/api/bundles", bundleRoutes);
 app.use("/api/bundle-bookings", bundleBookingRoutes);
 app.use("/api/calls", callRoutes);
 
-app.use((err: any, req: any, res: any, next: any) => {
-  if (res.headersSent) return next(err);
-
-  console.error(err.stack);
-
-  res.status(err.status || 500).json({
-    message: err.message || 'Something went wrong!',
-    error: process.env.NODE_ENV === 'development' ? err.message : undefined
-  });
-});
+app.use(errorHandler);
 
 export { app, server };

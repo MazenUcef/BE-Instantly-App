@@ -39,12 +39,13 @@ export const canConfirmSessionPayment = (status: string) => {
 
 export const canCompleteSession = (session: {
   workflowSteps: string[];
-  status: string;
+  currentStep: string | null;
 }) => {
   const lastStep =
     session.workflowSteps[session.workflowSteps.length - 1] ??
     SESSION_STATUS.STARTED;
-  return session.status === lastStep;
+  const current = session.currentStep || SESSION_STATUS.STARTED;
+  return current === lastStep;
 };
 
 export const canCancelSession = (status: string) => {

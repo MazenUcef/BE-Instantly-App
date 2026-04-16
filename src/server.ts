@@ -10,6 +10,7 @@ import { startNotificationWorker } from "./workers/notification.worker";
 import { startEmailWorker } from "./workers/email.worker";
 import { startCategoryWorker } from "./workers/category.worker";
 import { startSessionSchedulerWorker } from "./workers/session-scheduler.worker";
+import { warmupEmailTransport } from "./shared/utils/emailService";
 
 dotenv.config();
 const PORT = process.env.PORT || 6000;
@@ -24,6 +25,10 @@ const startServer = async () => {
     startSessionSchedulerWorker();
     await redis.ping();
     console.log("✅ Redis ready");
+
+    warmupEmailTransport().catch(() => {
+      // non-fatal: we still start the server; first email send will retry
+    });
 
     server.listen(PORT, () => {
       console.log(`🚀 Server running on port ${PORT}`);

@@ -1,41 +1,48 @@
-import UserModel from "../../modules/auth/models/User.model";
-import categoryModel from "../../modules/category/models/Category.model";
-import governmentModel from "../../modules/government/models/Government.model";
-import orderModel from "../../modules/order/models/Order.model";
-
+import prisma from "../config/prisma";
 
 export const buildSupplierOrderPayload = async (orderId: string) => {
-  const order = await orderModel.findById(orderId)
-    .populate({
-      path: "governmentId",
-      select: "name nameAr country isActive",
-      model: governmentModel,
-    })
-    .populate({
-      path: "categoryId",
-      select: "name description icon jobs",
-      model: categoryModel,
-    });
+  const order = await prisma.order.findUnique({
+    where: { id: orderId },
+    include: {
+      government: {
+        select: {
+          id: true,
+          name: true,
+          nameAr: true,
+          country: true,
+          isActive: true,
+        },
+      },
+      category: {
+        select: { id: true, name: true, description: true, jobs: true },
+      },
+    },
+  });
 
   if (!order) return null;
 
-  const customer = await UserModel.findById(order.customerId).select(
-    "-password -refreshToken -biometrics",
-  );
+  const customer = await prisma.user.findUnique({
+    where: { id: order.customerId },
+    select: {
+      id: true,
+      firstName: true,
+      lastName: true,
+      email: true,
+      phoneNumber: true,
+      profilePicture: true,
+      address: true,
+      averageRating: true,
+      totalReviews: true,
+    },
+  });
 
-  const orderObj = order.toObject();
-
-  const populatedCategory = orderObj.categoryId as any;
-  const populatedGovernment = orderObj.governmentId as any;
-
-  const { jobs, ...categoryWithoutJobs } = populatedCategory || { jobs: [] };
-
-  const { categoryId, governmentId, ...rest } = orderObj;
+  const { category, government, ...rest } = order;
+  const { jobs: _jobs, ...categoryWithoutJobs } = category || ({ jobs: [] } as any);
 
   return {
     ...rest,
     customer: customer || null,
-    government: populatedGovernment || null,
+    government: government || null,
     category: categoryWithoutJobs || null,
   };
 };

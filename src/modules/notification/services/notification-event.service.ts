@@ -4,7 +4,7 @@ export class NotificationEventService {
   static emitNotificationCreated(notification: any, unreadCount?: number) {
     const io = getIO();
 
-    io.to(socketRooms.user(notification.userId.toString())).emit(
+    io.to(socketRooms.user(notification.userId)).emit(
       socketEvents.NEW_NOTIFICATION,
       {
         notification,

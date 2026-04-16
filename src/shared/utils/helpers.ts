@@ -1,39 +1,47 @@
-import UserModel from "../../modules/auth/models/User.model";
-import bundleModel from "../../modules/bundle/models/bundle.model";
-import categoryModel from "../../modules/category/models/Category.model";
-import governmentModel from "../../modules/government/models/Government.model";
+import prisma from "../config/prisma";
 import { AppError } from "../middlewares/errorHandler";
 
 export const validateFile = (file: Express.Multer.File) => {
-  const allowedTypes = ['image/jpeg', 'image/png', 'image/webp'];
+  const allowedTypes = ["image/jpeg", "image/png", "image/webp"];
   if (!allowedTypes.includes(file.mimetype)) {
-    throw new AppError('Invalid file type', 400);
+    throw new AppError("Invalid file type", 400);
   }
 
   if (file.size > 5 * 1024 * 1024) {
-    throw new AppError('File too large', 400);
+    throw new AppError("File too large", 400);
   }
 };
 
-
-
 export const buildBundlePayload = async (bundleId: string) => {
-  const bundle = await bundleModel.findById(bundleId).lean();
+  const bundle = await prisma.bundle.findUnique({
+    where: { id: bundleId },
+    include: { governments: { include: { government: true } } },
+  });
   if (!bundle) return null;
 
-  const [supplier, category, governments] = await Promise.all([
-    UserModel.findById(bundle.supplierId)
-      .select("-password -refreshToken -biometrics")
-      .lean(),
-    categoryModel.findById(bundle.categoryId).lean(),
-    governmentModel.find({
-      _id: { $in: bundle.governmentIds || [] },
-      isActive: true,
-    }).lean(),
+  const [supplier, category] = await Promise.all([
+    prisma.user.findUnique({
+      where: { id: bundle.supplierId },
+      select: {
+        id: true,
+        firstName: true,
+        lastName: true,
+        profilePicture: true,
+        averageRating: true,
+        totalReviews: true,
+      },
+    }),
+    prisma.category.findUnique({ where: { id: bundle.categoryId } }),
   ]);
 
+  const governments = bundle.governments
+    .map((g) => g.government)
+    .filter((g) => g.isActive);
+
+  const { governments: _g, ...bundleRest } = bundle;
+
   return {
-    ...bundle,
+    ...bundleRest,
     supplier,
     category,
     governments,

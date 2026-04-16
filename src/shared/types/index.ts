@@ -1,7 +1,7 @@
-import { Document, Types } from "mongoose";
 import { Request } from "express";
 
-export interface ICategory extends Document {
+export interface ICategory {
+  id: string;
   name: string;
   description: string;
   createdAt: Date;
@@ -9,7 +9,7 @@ export interface ICategory extends Document {
 }
 
 export interface IUser {
-  _id: string;
+  id: string;
   firstName: string;
   profilePicture: string;
   lastName: string;
@@ -18,18 +18,12 @@ export interface IUser {
   role: "customer" | "supplier" | "admin";
   isProfileComplete: boolean;
   address: string;
-  categoryId: Types.ObjectId;
-  nationalId: string;
-  governmentIds?: Types.ObjectId[];
+  categoryId: string | null;
+  governmentIds?: string[];
   jobTitles?: string[];
   phoneNumber: string;
-  nationalIdPhotoFront?: string;
-  nationalIdPhotoBack?: string;
   isEmailVerified: boolean;
   isPhoneVerified: boolean;
-  resetPasswordToken?: string;
-  resetPasswordExpire?: Date;
-  refreshToken?: string;
   createdAt: Date;
   updatedAt: Date;
   biometrics?: Array<{
@@ -40,19 +34,13 @@ export interface IUser {
   }>;
   averageRating?: number;
   totalReviews?: number;
-  reviews?: Array<{
-    reviewerId: string;
-    reviewerName: string;
-    rating: number;
-    comment: string;
-    createdAt: Date;
-  }>;
 }
 
 export interface ITokenPayload {
   userId: string;
   role: string;
   sessionId?: string;
+  token?: string;
   iat?: number;
   exp?: number;
 }

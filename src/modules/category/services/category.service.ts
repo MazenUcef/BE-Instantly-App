@@ -1,11 +1,10 @@
-import mongoose from "mongoose";
+import prisma from "../../../shared/config/prisma";
 import { AppError } from "../../../shared/middlewares/errorHandler";
-import { CategoryRepository } from "../repositories/category.repository";
+import { CategoryRepository, ISessionWorkflowDef } from "../repositories/category.repository";
 import { uploadToCloudinary } from "../../../shared/utils/cloudinary";
 import { validateFile } from "../../../shared/utils/helpers";
 import { publishToQueue } from "../../../shared/config/rabbitmq";
 import { CATEGORY_QUEUE_EVENTS } from "../../../shared/constants/category.constants";
-import { ISessionWorkflowDef } from "../models/Category.model";
 
 const normalizeCategoryName = (name: string) =>
   name.trim().toLowerCase().replace(/\s+/g, " ");
@@ -49,59 +48,43 @@ const normalizeWorkflows = (workflows: unknown): ISessionWorkflowDef[] => {
 
 export class CategoryService {
   static async createCategory(req: any) {
-    const dbSession = await mongoose.startSession();
+    const files = req.files as any;
+    const { name, description } = req.body;
+    const jobs = normalizeJobs(req.body.jobs);
+    const workflows = normalizeWorkflows(req.body.workflows);
+    const normalizedName = normalizeCategoryName(name);
 
-    let createdCategory: any = null;
-
-    try {
-      await dbSession.withTransaction(async () => {
-        const files = req.files as any;
-        const { name, description } = req.body;
-        const jobs = normalizeJobs(req.body.jobs);
-        const workflows = normalizeWorkflows(req.body.workflows);
-
-        const normalizedName = normalizeCategoryName(name);
-
-        const existingCategory = await CategoryRepository.findByNormalizedName(
-          normalizedName,
-          dbSession,
-        );
-
-        if (existingCategory) {
-          throw new AppError("Category already exists", 409);
-        }
-
-        let imageUrl: string | null = null;
-
-        if (files?.image?.[0]) {
-          validateFile(files.image[0]);
-          const upload = await uploadToCloudinary(files.image[0]);
-          imageUrl = upload.secure_url;
-        } else if (req.body.image) {
-          imageUrl = req.body.image;
-        } else {
-          throw new AppError("Category image is required", 400);
-        }
-
-        createdCategory = await CategoryRepository.create(
-          {
-            name: name.trim(),
-            normalizedName,
-            description: description?.trim?.() || null,
-            image: imageUrl,
-            jobs,
-            workflows,
-            isActive: true,
-          },
-          dbSession,
-        );
-      });
-    } finally {
-      await dbSession.endSession();
+    let imageUrl: string | null = null;
+    if (files?.image?.[0]) {
+      validateFile(files.image[0]);
+      const upload = await uploadToCloudinary(files.image[0]);
+      imageUrl = upload.secure_url;
+    } else if (req.body.image) {
+      imageUrl = req.body.image;
+    } else {
+      throw new AppError("Category image is required", 400);
     }
 
+    const createdCategory = await prisma.$transaction(async (tx) => {
+      const existing = await CategoryRepository.findByNormalizedName(normalizedName, tx);
+      if (existing) throw new AppError("Category already exists", 409);
+
+      return CategoryRepository.create(
+        {
+          name: name.trim(),
+          normalizedName,
+          description: description?.trim?.() || null,
+          image: imageUrl,
+          jobs,
+          workflows,
+          isActive: true,
+        },
+        tx,
+      );
+    });
+
     await publishToQueue(CATEGORY_QUEUE_EVENTS.CREATED, {
-      categoryId: createdCategory._id.toString(),
+      categoryId: createdCategory.id,
       name: createdCategory.name,
       description: createdCategory.description,
       image: createdCategory.image,
@@ -144,70 +127,45 @@ export class CategoryService {
     const categoryId = req.params.id;
     const files = req.files as any;
 
-    const dbSession = await mongoose.startSession();
-    let updatedCategory: any = null;
-
-    try {
-      await dbSession.withTransaction(async () => {
-        const category = await CategoryRepository.findById(categoryId, dbSession);
-
-        if (!category) {
-          throw new AppError("Category not found", 404);
-        }
-
-        const updates: Record<string, any> = {};
-
-        if (req.body.name !== undefined) {
-          const trimmedName = req.body.name.trim();
-          const normalizedName = normalizeCategoryName(trimmedName);
-
-          if (normalizedName !== category.normalizedName) {
-            const existingCategory = await CategoryRepository.findByNormalizedName(
-              normalizedName,
-              dbSession,
-            );
-
-            if (existingCategory && existingCategory._id.toString() !== categoryId) {
-              throw new AppError("Category name already exists", 409);
-            }
-          }
-
-          updates.name = trimmedName;
-          updates.normalizedName = normalizedName;
-        }
-
-        if (req.body.description !== undefined) {
-          updates.description = req.body.description?.trim?.() || null;
-        }
-
-        if (req.body.jobs !== undefined) {
-          updates.jobs = normalizeJobs(req.body.jobs);
-        }
-
-        if (req.body.workflows !== undefined) {
-          updates.workflows = normalizeWorkflows(req.body.workflows);
-        }
-
-        if (files?.image?.[0]) {
-          validateFile(files.image[0]);
-          const upload = await uploadToCloudinary(files.image[0]);
-          updates.image = upload.secure_url;
-        } else if (req.body.image !== undefined) {
-          updates.image = req.body.image || null;
-        }
-
-        updatedCategory = await CategoryRepository.updateById(
-          categoryId,
-          updates,
-          dbSession,
-        );
-      });
-    } finally {
-      await dbSession.endSession();
+    let imageUrl: string | null | undefined;
+    if (files?.image?.[0]) {
+      validateFile(files.image[0]);
+      const upload = await uploadToCloudinary(files.image[0]);
+      imageUrl = upload.secure_url;
+    } else if (req.body.image !== undefined) {
+      imageUrl = req.body.image || null;
     }
 
+    const updatedCategory = await prisma.$transaction(async (tx) => {
+      const category = await CategoryRepository.findById(categoryId, tx);
+      if (!category) throw new AppError("Category not found", 404);
+
+      const updates: any = {};
+      if (req.body.name !== undefined) {
+        const trimmedName = req.body.name.trim();
+        const normalizedName = normalizeCategoryName(trimmedName);
+        if (normalizedName !== category.normalizedName) {
+          const existing = await CategoryRepository.findByNormalizedName(normalizedName, tx);
+          if (existing && existing.id !== categoryId) {
+            throw new AppError("Category name already exists", 409);
+          }
+        }
+        updates.name = trimmedName;
+        updates.normalizedName = normalizedName;
+      }
+      if (req.body.description !== undefined) {
+        updates.description = req.body.description?.trim?.() || null;
+      }
+      if (req.body.jobs !== undefined) updates.jobs = normalizeJobs(req.body.jobs);
+      if (req.body.workflows !== undefined)
+        updates.workflows = normalizeWorkflows(req.body.workflows);
+      if (imageUrl !== undefined) updates.image = imageUrl;
+
+      return CategoryRepository.updateById(categoryId, updates, tx);
+    });
+
     await publishToQueue(CATEGORY_QUEUE_EVENTS.UPDATED, {
-      categoryId: updatedCategory._id.toString(),
+      categoryId: updatedCategory.id,
       name: updatedCategory.name,
       description: updatedCategory.description,
       image: updatedCategory.image,
@@ -238,9 +196,9 @@ export class CategoryService {
     });
 
     await publishToQueue(CATEGORY_QUEUE_EVENTS.DEACTIVATED, {
-      categoryId: updatedCategory!._id.toString(),
-      name: updatedCategory!.name,
-      isActive: updatedCategory!.isActive,
+      categoryId: updatedCategory.id,
+      name: updatedCategory.name,
+      isActive: updatedCategory.isActive,
     });
 
     return {

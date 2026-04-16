@@ -251,7 +251,7 @@ class AuthService {
         const normalizedEmail = email.toLowerCase().trim();
         const lockKey = `login:lock:${normalizedEmail}`;
         if (await redis_1.default.get(lockKey)) {
-            throw new errorHandler_1.AppError("Account locked. Try later.", 429);
+            throw new errorHandler_1.AppError("Account locked. Try later after 15 mins.", 429);
         }
         const user = await user_repository_1.UserRepository.findByEmail(normalizedEmail);
         if (!user || !(await (0, password_1.comparePassword)(password, user.password))) {

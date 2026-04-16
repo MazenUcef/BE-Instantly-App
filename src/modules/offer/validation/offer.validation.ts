@@ -22,7 +22,7 @@ const handleValidationErrors = (
 export const validateCreateOffer: RequestHandler[] = [
   body("orderId")
     .notEmpty()
-    .isMongoId()
+    .isUUID()
     .withMessage("Valid orderId is required"),
   body("amount")
     .notEmpty()
@@ -44,17 +44,32 @@ export const validateCreateOffer: RequestHandler[] = [
 ];
 
 export const validateAcceptOrderDirect: RequestHandler[] = [
-  param("orderId").isMongoId().withMessage("Invalid order id"),
+  param("orderId").isUUID().withMessage("Invalid order id"),
   handleValidationErrors,
 ];
 
 export const validateOfferIdParam: RequestHandler[] = [
-  param("id").isMongoId().withMessage("Invalid offer id"),
+  param("id").isUUID().withMessage("Invalid offer id"),
+  handleValidationErrors,
+];
+
+export const validateDeleteOffer: RequestHandler[] = [
+  param("id").isUUID().withMessage("Invalid offer id"),
+  body("reason")
+    .notEmpty()
+    .withMessage("Reason is required when withdrawing an offer")
+    .bail()
+    .isString()
+    .withMessage("Reason must be a string")
+    .bail()
+    .trim()
+    .isLength({ min: 3, max: 500 })
+    .withMessage("Reason must be between 3 and 500 characters"),
   handleValidationErrors,
 ];
 
 export const validateOrderIdParam: RequestHandler[] = [
-  param("orderId").isMongoId().withMessage("Invalid order id"),
+  param("orderId").isUUID().withMessage("Invalid order id"),
   handleValidationErrors,
 ];
 

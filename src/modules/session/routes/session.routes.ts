@@ -18,7 +18,7 @@ import {
   validateUpdateSessionStatus,
 } from "../validators/session.validation";
 
-const router = Router();
+const router = Router(); 
 
 router.patch(
   "/:id/status",
@@ -42,9 +42,8 @@ router.patch(
 );
 
 router.get(
-  "/active/:userId",
+  "/active",
   authenticate,
-  validateUserIdParam,
   getActiveSessionForUser,
 );
 

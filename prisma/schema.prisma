@@ -1,0 +1,577 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================================
+// ENUMS
+// ============================================================
+
+enum UserRole {
+  customer
+  supplier
+  admin
+}
+
+enum BiometricType {
+  faceid
+  fingerprint
+  passcode
+}
+
+enum OrderStatus {
+  pending
+  scheduled
+  in_progress
+  completed
+  cancelled
+}
+
+enum OrderType {
+  contract
+  daily
+}
+
+enum OrderCancelledBy {
+  customer
+  supplier
+  system
+  admin
+}
+
+enum OfferStatus {
+  pending
+  accepted
+  rejected
+  expired
+  completed
+  withdrawn
+}
+
+enum SessionStatus {
+  started
+  completed
+  cancelled
+}
+
+enum SessionCancelledBy {
+  customer
+  supplier
+  system
+  admin
+}
+
+enum CallType {
+  audio
+  video
+}
+
+enum CallStatus {
+  initiated
+  ringing
+  accepted
+  declined
+  missed
+  ended
+  failed
+}
+
+enum CallEndReason {
+  caller_ended
+  receiver_ended
+  missed
+  declined
+  failed
+  busy
+}
+
+enum BundleBookingStatus {
+  pending_supplier_approval
+  pending_customer_approval
+  accepted
+  rejected
+  in_progress
+  done
+  completed
+  cancelled
+}
+
+enum BundleBookingCancelledBy {
+  customer
+  supplier
+}
+
+// ============================================================
+// USER & AUTH
+// ============================================================
+
+model User {
+  id                String          @id @default(uuid()) @db.Uuid
+  firstName         String
+  lastName          String
+  email             String          @unique
+  phoneNumber       String          @unique
+  password          String
+  role              UserRole        @default(customer)
+  categoryId        String?         @db.Uuid
+  address           String
+  profilePicture    String?
+  isEmailVerified   Boolean         @default(false)
+  isPhoneVerified   Boolean         @default(false)
+  isProfileComplete Boolean         @default(false)
+  averageRating     Decimal         @default(0) @db.Decimal(3, 2)
+  totalReviews      Int             @default(0)
+  jobTitles         String[]
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+
+  category          Category?       @relation(fields: [categoryId], references: [id])
+  governments       UserGovernment[]
+  biometrics        UserBiometric[]
+  availability      SupplierAvailability?
+  customerOrders    Order[]         @relation("CustomerOrders")
+  supplierOrders    Order[]         @relation("SupplierOrders")
+  offers            Offer[]
+  customerSessions  JobSession[]    @relation("CustomerSessions")
+  supplierSessions  JobSession[]    @relation("SupplierSessions")
+  sentMessages      Message[]       @relation("MessageSender")
+  receivedMessages  Message[]       @relation("MessageReceiver")
+  initiatedCalls    CallSession[]   @relation("CallCaller")
+  receivedCalls     CallSession[]   @relation("CallReceiver")
+  notifications     Notification[]
+  bundles           Bundle[]
+  customerBookings  BundleBooking[] @relation("BundleCustomerBookings")
+  supplierBookings  BundleBooking[] @relation("BundleSupplierBookings")
+  reviewsGiven      Review[]        @relation("ReviewsGiven")
+  reviewsReceived   Review[]        @relation("ReviewsReceived")
+
+  @@index([role, categoryId])
+  @@index([isEmailVerified])
+  @@index([isProfileComplete])
+}
+
+model UserBiometric {
+  id           String        @id @default(uuid()) @db.Uuid
+  userId       String        @db.Uuid
+  deviceId     String
+  type         BiometricType
+  passcodeHash String?
+  createdAt    DateTime      @default(now())
+
+  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([deviceId])
+}
+
+model UserGovernment {
+  userId       String     @db.Uuid
+  governmentId String     @db.Uuid
+
+  user         User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  government   Government @relation(fields: [governmentId], references: [id], onDelete: Cascade)
+
+  @@id([userId, governmentId])
+  @@index([governmentId])
+}
+
+// ============================================================
+// TAXONOMY
+// ============================================================
+
+model Category {
+  id             String             @id @default(uuid()) @db.Uuid
+  name           String
+  normalizedName String             @unique
+  description    String?
+  image          String?
+  jobs           String[]
+  isActive       Boolean            @default(true)
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
+
+  workflows      CategoryWorkflow[]
+  users          User[]
+  orders         Order[]
+  bundles        Bundle[]
+  bundleBookings BundleBooking[]
+
+  @@index([isActive, createdAt])
+}
+
+model CategoryWorkflow {
+  id         String   @id @default(uuid()) @db.Uuid
+  categoryId String   @db.Uuid
+  key        String
+  label      String
+  steps      String[]
+
+  category   Category @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+
+  @@unique([categoryId, key])
+}
+
+model Government {
+  id               String             @id @default(uuid()) @db.Uuid
+  name             String
+  nameAr           String
+  normalizedName   String             @unique
+  normalizedNameAr String             @unique
+  country          String             @default("Egypt")
+  isActive         Boolean            @default(true)
+  order            Int                @default(0)
+  createdAt        DateTime           @default(now())
+  updatedAt        DateTime           @updatedAt
+
+  users            UserGovernment[]
+  orders           Order[]
+  bundles          BundleGovernment[]
+  bundleBookings   BundleBooking[]
+
+  @@index([isActive, order, name])
+}
+
+// ============================================================
+// ORDER / OFFER / SESSION
+// ============================================================
+
+model Order {
+  id                 String            @id @default(uuid()) @db.Uuid
+  customerId         String            @db.Uuid
+  customerName       String
+  supplierId         String?           @db.Uuid
+  categoryId         String            @db.Uuid
+  governmentId       String            @db.Uuid
+  jobTitle           String
+  address            String
+  description        String
+  requestedPrice     Decimal           @db.Decimal(12, 2)
+  orderType          OrderType         @default(daily)
+  selectedWorkflow   String
+  expectedDays       Int?
+  status             OrderStatus       @default(pending)
+  finalPrice         Decimal?          @db.Decimal(12, 2)
+  customerReviewed   Boolean           @default(false)
+  supplierReviewed   Boolean           @default(false)
+  timeToStart        DateTime?
+  scheduledAt        DateTime?
+  estimatedDuration  Int?
+  images             Json              @default("[]")
+  files              Json              @default("[]")
+  cancelledBy        OrderCancelledBy?
+  cancellationReason String?
+  cancelledAt        DateTime?
+  completedAt        DateTime?
+  createdAt          DateTime          @default(now())
+  updatedAt          DateTime          @updatedAt
+
+  customer           User              @relation("CustomerOrders", fields: [customerId], references: [id])
+  supplier           User?             @relation("SupplierOrders", fields: [supplierId], references: [id])
+  category           Category          @relation(fields: [categoryId], references: [id])
+  government         Government        @relation(fields: [governmentId], references: [id])
+  offers             Offer[]
+  sessions           JobSession[]
+  reviews            Review[]
+
+  @@index([categoryId, governmentId, status, createdAt])
+  @@index([customerId, status, createdAt])
+  @@index([supplierId, status, updatedAt])
+  @@index([customerId, customerReviewed, status, updatedAt])
+}
+
+model Offer {
+  id                String       @id @default(uuid()) @db.Uuid
+  orderId           String       @db.Uuid
+  supplierId        String       @db.Uuid
+  amount            Decimal      @db.Decimal(12, 2)
+  estimatedDuration Int?
+  expectedDays      Int?
+  timeToStart       DateTime?
+  status            OfferStatus  @default(pending)
+  expiresAt         DateTime?
+  acceptedAt        DateTime?
+  rejectedAt        DateTime?
+  withdrawnAt       DateTime?
+  withdrawnReason   String?
+  completedAt       DateTime?
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
+
+  order             Order        @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  supplier          User         @relation(fields: [supplierId], references: [id])
+  sessions          JobSession[]
+
+  @@index([orderId, status, createdAt])
+  @@index([supplierId, status, createdAt])
+  @@index([supplierId, updatedAt])
+  @@index([supplierId, status, timeToStart])
+}
+
+model JobSession {
+  id                 String              @id @default(uuid()) @db.Uuid
+  orderId            String?             @db.Uuid
+  offerId            String?             @db.Uuid
+  bundleBookingId    String?             @db.Uuid
+  customerId         String              @db.Uuid
+  supplierId         String              @db.Uuid
+  workflowSteps      String[]
+  currentStep        String?
+  stepTimestamps     Json                @default("{}")
+  paymentConfirmed   Boolean             @default(false)
+  paymentConfirmedAt DateTime?
+  status             SessionStatus       @default(started)
+  cancelledBy        SessionCancelledBy?
+  cancellationReason String?
+  startedAt          DateTime?           @default(now())
+  completedAt        DateTime?
+  cancelledAt        DateTime?
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+
+  order              Order?              @relation(fields: [orderId], references: [id])
+  offer              Offer?              @relation(fields: [offerId], references: [id])
+  bundleBooking      BundleBooking?      @relation(fields: [bundleBookingId], references: [id])
+  customer           User                @relation("CustomerSessions", fields: [customerId], references: [id])
+  supplier           User                @relation("SupplierSessions", fields: [supplierId], references: [id])
+  messages           Message[]
+  calls              CallSession[]
+  reviews            Review[]
+
+  @@index([customerId, status, updatedAt])
+  @@index([supplierId, status, updatedAt])
+  @@index([status, updatedAt])
+}
+
+// ============================================================
+// CHAT & CALL
+// ============================================================
+
+model Message {
+  id          String     @id @default(uuid()) @db.Uuid
+  sessionId   String     @db.Uuid
+  senderId    String     @db.Uuid
+  receiverId  String     @db.Uuid
+  message     String
+  read        Boolean    @default(false)
+  readAt      DateTime?
+  deliveredAt DateTime?
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+
+  session     JobSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  sender      User       @relation("MessageSender", fields: [senderId], references: [id])
+  receiver    User       @relation("MessageReceiver", fields: [receiverId], references: [id])
+
+  @@index([sessionId, createdAt])
+  @@index([receiverId, read, createdAt])
+  @@index([sessionId, receiverId, read])
+}
+
+model CallSession {
+  id         String         @id @default(uuid()) @db.Uuid
+  sessionId  String         @db.Uuid
+  callerId   String         @db.Uuid
+  receiverId String         @db.Uuid
+  type       CallType       @default(audio)
+  status     CallStatus     @default(initiated)
+  startedAt  DateTime?
+  answeredAt DateTime?
+  endedAt    DateTime?
+  endReason  CallEndReason?
+  createdAt  DateTime       @default(now())
+  updatedAt  DateTime       @updatedAt
+
+  session    JobSession     @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  caller     User           @relation("CallCaller", fields: [callerId], references: [id])
+  receiver   User           @relation("CallReceiver", fields: [receiverId], references: [id])
+
+  @@index([sessionId, status])
+  @@index([callerId, createdAt])
+  @@index([receiverId, createdAt])
+  @@index([sessionId, createdAt])
+}
+
+// ============================================================
+// NOTIFICATION
+// ============================================================
+
+model Notification {
+  id        String    @id @default(uuid()) @db.Uuid
+  userId    String    @db.Uuid
+  type      String
+  title     String
+  message   String
+  data      Json?
+  isRead    Boolean   @default(false)
+  readAt    DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@index([userId, isRead, createdAt])
+  @@index([userId, type, createdAt])
+}
+
+// ============================================================
+// REVIEW
+// ============================================================
+
+model Review {
+  id           String      @id @default(uuid()) @db.Uuid
+  reviewerId   String      @db.Uuid
+  targetUserId String      @db.Uuid
+  orderId      String      @db.Uuid
+  sessionId    String?     @db.Uuid
+  rating       Int
+  comment      String
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+
+  reviewer     User        @relation("ReviewsGiven", fields: [reviewerId], references: [id])
+  target       User        @relation("ReviewsReceived", fields: [targetUserId], references: [id])
+  order        Order       @relation(fields: [orderId], references: [id])
+  session      JobSession? @relation(fields: [sessionId], references: [id])
+
+  @@unique([reviewerId, orderId])
+  @@index([targetUserId, createdAt])
+  @@index([orderId, createdAt])
+}
+
+// ============================================================
+// AVAILABILITY
+// ============================================================
+
+model SupplierAvailability {
+  id             String               @id @default(uuid()) @db.Uuid
+  supplierId     String               @unique @db.Uuid
+  timezone       String               @default("Africa/Cairo")
+  createdAt      DateTime             @default(now())
+  updatedAt      DateTime             @updatedAt
+
+  supplier       User                 @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+  weeklySchedule WeeklyScheduleItem[]
+  blockedDates   BlockedDate[]
+}
+
+model WeeklyScheduleItem {
+  id                  String               @id @default(uuid()) @db.Uuid
+  availabilityId      String               @db.Uuid
+  dayOfWeek           Int
+  isWorking           Boolean              @default(false)
+  startTime           String?
+  endTime             String?
+  slotDurationMinutes Int                  @default(60)
+  breakStart          String?
+  breakEnd            String?
+
+  availability        SupplierAvailability @relation(fields: [availabilityId], references: [id], onDelete: Cascade)
+
+  @@unique([availabilityId, dayOfWeek])
+}
+
+model BlockedDate {
+  id             String               @id @default(uuid()) @db.Uuid
+  availabilityId String               @db.Uuid
+  date           DateTime             @db.Date
+  reason         String?
+  isFullDay      Boolean              @default(true)
+  startTime      String?
+  endTime        String?
+
+  availability   SupplierAvailability @relation(fields: [availabilityId], references: [id], onDelete: Cascade)
+
+  @@index([availabilityId, date])
+}
+
+// ============================================================
+// BUNDLE
+// ============================================================
+
+model Bundle {
+  id               String             @id @default(uuid()) @db.Uuid
+  supplierId       String             @db.Uuid
+  categoryId       String             @db.Uuid
+  title            String
+  subtitle         String?
+  description      String
+  image            String?
+  price            Decimal            @db.Decimal(12, 2)
+  oldPrice         Decimal?           @db.Decimal(12, 2)
+  durationMinutes  Int                @default(60)
+  includes         String[]
+  tags             String[]
+  selectedWorkflow String?
+  isActive         Boolean            @default(true)
+  createdAt        DateTime           @default(now())
+  updatedAt        DateTime           @updatedAt
+
+  supplier         User               @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+  category         Category           @relation(fields: [categoryId], references: [id])
+  governments      BundleGovernment[]
+  bookings         BundleBooking[]
+
+  @@index([supplierId, isActive, createdAt])
+  @@index([categoryId, isActive, createdAt])
+  @@index([supplierId, categoryId, createdAt])
+}
+
+model BundleGovernment {
+  bundleId     String     @db.Uuid
+  governmentId String     @db.Uuid
+
+  bundle       Bundle     @relation(fields: [bundleId], references: [id], onDelete: Cascade)
+  government   Government @relation(fields: [governmentId], references: [id], onDelete: Cascade)
+
+  @@id([bundleId, governmentId])
+  @@index([governmentId])
+}
+
+model BundleBooking {
+  id                  String                    @id @default(uuid()) @db.Uuid
+  bundleId            String                    @db.Uuid
+  supplierId          String                    @db.Uuid
+  customerId          String                    @db.Uuid
+  categoryId          String                    @db.Uuid
+  governmentId        String                    @db.Uuid
+  address             String
+  notes               String?
+  bookedDate          String
+  slotStart           String
+  slotEnd             String
+  scheduledAt         DateTime
+  status              BundleBookingStatus       @default(pending_supplier_approval)
+  paymentConfirmed    Boolean                   @default(false)
+  paymentConfirmedAt  DateTime?
+  finalPrice          Decimal                   @db.Decimal(12, 2)
+  selectedWorkflow    String?
+  customerReviewed    Boolean                   @default(false)
+  supplierReviewed    Boolean                   @default(false)
+  rejectionReason     String?
+  cancelledBy         BundleBookingCancelledBy?
+  proposedBookedDate  String?
+  proposedSlotStart   String?
+  proposedSlotEnd     String?
+  proposedScheduledAt DateTime?
+  createdAt           DateTime                  @default(now())
+  updatedAt           DateTime                  @updatedAt
+
+  bundle              Bundle                    @relation(fields: [bundleId], references: [id])
+  supplier            User                      @relation("BundleSupplierBookings", fields: [supplierId], references: [id])
+  customer            User                      @relation("BundleCustomerBookings", fields: [customerId], references: [id])
+  category            Category                  @relation(fields: [categoryId], references: [id])
+  government          Government                @relation(fields: [governmentId], references: [id])
+  sessions            JobSession[]
+
+  @@index([supplierId, status, scheduledAt])
+  @@index([customerId, status, scheduledAt])
+  @@index([bundleId, scheduledAt])
+  @@index([supplierId, bookedDate, slotStart, slotEnd])
+  @@index([customerId, createdAt])
+  @@index([customerId, bookedDate, slotStart, slotEnd])
+}

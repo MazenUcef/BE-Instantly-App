@@ -20,35 +20,35 @@ const handleValidationErrors = (
 };
 
 export const validateCreateSession: RequestHandler[] = [
-  body("orderId").notEmpty().isMongoId().withMessage("Valid orderId is required"),
-  body("offerId").notEmpty().isMongoId().withMessage("Valid offerId is required"),
-  body("customerId").notEmpty().isMongoId().withMessage("Valid customerId is required"),
-  body("supplierId").notEmpty().isMongoId().withMessage("Valid supplierId is required"),
+  body("orderId").notEmpty().isUUID().withMessage("Valid orderId is required"),
+  body("offerId").notEmpty().isUUID().withMessage("Valid offerId is required"),
+  body("customerId").notEmpty().isUUID().withMessage("Valid customerId is required"),
+  body("supplierId").notEmpty().isUUID().withMessage("Valid supplierId is required"),
   handleValidationErrors,
 ];
 
 export const validateSessionIdParam: RequestHandler[] = [
-  param("id").isMongoId().withMessage("Invalid session id"),
+  param("id").isUUID().withMessage("Invalid session id"),
   handleValidationErrors,
 ];
 
 export const validateSessionPaymentParam: RequestHandler[] = [
-  param("sessionId").isMongoId().withMessage("Invalid session id"),
+  param("sessionId").isUUID().withMessage("Invalid session id"),
   handleValidationErrors,
 ];
 
 export const validateOrderIdParam: RequestHandler[] = [
-  param("orderId").isMongoId().withMessage("Invalid order id"),
+  param("orderId").isUUID().withMessage("Invalid order id"),
   handleValidationErrors,
 ];
 
 export const validateUserIdParam: RequestHandler[] = [
-  param("userId").isMongoId().withMessage("Invalid user id"),
+  param("userId").isUUID().withMessage("Invalid user id"),
   handleValidationErrors,
 ];
 
 export const validateUpdateSessionStatus: RequestHandler[] = [
-  param("id").isMongoId().withMessage("Invalid session id"),
+  param("id").isUUID().withMessage("Invalid session id"),
   body("status")
     .notEmpty()
     .withMessage("status is required")

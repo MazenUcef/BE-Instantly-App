@@ -24,7 +24,7 @@ export const validateSendMessage: RequestHandler[] = [
     .notEmpty()
     .withMessage("Session ID is required")
     .bail()
-    .isMongoId()
+    .isUUID()
     .withMessage("Invalid session ID"),
 
   body("message")
@@ -42,7 +42,7 @@ export const validateSendMessage: RequestHandler[] = [
 ];
 
 export const validateGetMessagesBySession: RequestHandler[] = [
-  param("sessionId").isMongoId().withMessage("Invalid session ID"),
+  param("sessionId").isUUID().withMessage("Invalid session ID"),
 
   query("page")
     .optional()
@@ -60,6 +60,6 @@ export const validateGetMessagesBySession: RequestHandler[] = [
 ];
 
 export const validateMarkMessagesAsRead: RequestHandler[] = [
-  param("sessionId").isMongoId().withMessage("Invalid session ID"),
+  param("sessionId").isUUID().withMessage("Invalid session ID"),
   handleValidationErrors,
 ];

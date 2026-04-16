@@ -1,21 +1,16 @@
+import { getChannel } from "../shared/config/rabbitmq";
 import { publishNotification } from "../modules/notification/notification.publisher";
-import { connectRabbitMQ } from "../shared/config/rabbitmq";
 import { sendEmailOTP } from "../shared/utils/emailService";
 
 export const startUserWorker = async () => {
-  const { channel } = await connectRabbitMQ();
+  const channel = getChannel();
+
+  await channel.assertQueue("USER_REGISTERED", { durable: true });
+
   channel.consume("USER_REGISTERED", async (msg) => {
-    if (!msg) {
-      console.log("No message received");
-      return;
-    }
-    console.log(
-      "Worker received USER_REGISTERED message:",
-      msg.content.toString(),
-    );
+    if (!msg) return;
 
     const data = JSON.parse(msg.content.toString());
-    console.log("Parsed data:", data);
 
     try {
       await sendEmailOTP(data.email, data.otp);
@@ -31,7 +26,9 @@ export const startUserWorker = async () => {
       channel.ack(msg);
     } catch (err) {
       console.error("Error processing USER_REGISTERED", err);
+      channel.nack(msg, false, true);
     }
   });
-console.log("✅ User worker started, listening to 'USER_REGISTERED'");
+
+  console.log("✅ User worker started, listening to 'USER_REGISTERED'");
 };

@@ -1,33 +1,36 @@
-import mongoose from "mongoose";
+import prisma from "../../../shared/config/prisma";
+import { Prisma, SessionStatus } from "@prisma/client";
 import { AppError } from "../../../shared/middlewares/errorHandler";
 import { ChatRepository } from "../repositories/chat.repository";
-import JobSession from "../../session/models/session.model";
 import { getIO, socketEvents, socketRooms } from "../../../shared/config/socket";
 import { CHAT_SESSION_BLOCKED_STATUSES } from "../../../shared/constants/chat.constants";
 
-const normalizePaginatedMessages = (messages: any[]) => {
-  return [...messages].reverse();
-};
+const normalizePaginatedMessages = (messages: any[]) => [...messages].reverse();
+
+type Tx = Prisma.TransactionClient;
 
 export class ChatService {
-  private static async getAccessibleSession(sessionId: string, userId: string, dbSession?: any) {
-    const session = await JobSession.findById(sessionId).session(dbSession || null);
+  private static async getAccessibleSession(
+    sessionId: string,
+    userId: string,
+    tx?: Tx,
+  ) {
+    const session = await (tx ?? prisma).jobSession.findUnique({
+      where: { id: sessionId },
+    });
 
-    if (!session) {
-      throw new AppError("Session not found", 404);
-    }
+    if (!session) throw new AppError("Session not found", 404);
 
     if ((CHAT_SESSION_BLOCKED_STATUSES as readonly string[]).includes(session.status)) {
-      throw new AppError("Chat is closed. Session already completed or cancelled.", 403);
+      throw new AppError(
+        "Chat is closed. Session already completed or cancelled.",
+        403,
+      );
     }
 
     const isParticipant =
-      session.customerId.toString() === userId ||
-      session.supplierId.toString() === userId;
-
-    if (!isParticipant) {
-      throw new AppError("Not allowed in this chat", 403);
-    }
+      session.customerId === userId || session.supplierId === userId;
+    if (!isParticipant) throw new AppError("Not allowed in this chat", 403);
 
     return session;
   }
@@ -39,20 +42,13 @@ export class ChatService {
   }) {
     const { senderId, sessionId, message } = input;
 
-    const dbSession = await mongoose.startSession();
-    let createdMessage: any = null;
-    let receiverId: string | null = null;
+    const { createdMessage, receiverId } = await prisma.$transaction(
+      async (tx) => {
+        const session = await this.getAccessibleSession(sessionId, senderId, tx);
+        const receiverId =
+          senderId === session.customerId ? session.supplierId : session.customerId;
 
-    try {
-      await dbSession.withTransaction(async () => {
-        const session = await this.getAccessibleSession(sessionId, senderId, dbSession);
-
-        receiverId =
-          senderId === session.customerId.toString()
-            ? session.supplierId.toString()
-            : session.customerId.toString();
-
-        createdMessage = await ChatRepository.createMessage(
+        const createdMessage = await ChatRepository.createMessage(
           {
             sessionId,
             senderId,
@@ -60,22 +56,16 @@ export class ChatService {
             message: message.trim(),
             deliveredAt: new Date(),
           },
-          dbSession,
+          tx,
         );
-      });
-    } finally {
-      await dbSession.endSession();
-    }
+        return { createdMessage, receiverId };
+      },
+    );
 
     const io = getIO();
-
-    const payload = {
-      message: createdMessage,
-      sessionId,
-    };
-
+    const payload = { message: createdMessage, sessionId };
     io.to(socketRooms.chat(sessionId)).emit(socketEvents.MESSAGE_NEW, payload);
-    io.to(socketRooms.user(receiverId!)).emit(socketEvents.MESSAGE_NEW, payload);
+    io.to(socketRooms.user(receiverId)).emit(socketEvents.MESSAGE_NEW, payload);
     io.to(socketRooms.user(senderId)).emit(socketEvents.MESSAGE_NEW, payload);
 
     return {
@@ -110,14 +100,10 @@ export class ChatService {
     };
   }
 
-  static async markMessagesAsRead(input: {
-    userId: string;
-    sessionId: string;
-  }) {
+  static async markMessagesAsRead(input: { userId: string; sessionId: string }) {
     const { userId, sessionId } = input;
 
     await this.getAccessibleSession(sessionId, userId);
-
     await ChatRepository.markSessionMessagesAsRead(sessionId, userId);
 
     const unreadCount = await ChatRepository.countUnreadBySessionForUser(

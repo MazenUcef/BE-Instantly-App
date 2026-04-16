@@ -1,18 +1,51 @@
-import mongoose from "mongoose";
-import UserModel from "../../auth/models/User.model";
-import orderModel from "../../order/models/Order.model";
-import sessionModel from "../../session/models/session.model";
-import CategoryModel from "../../category/models/Category.model";
+import prisma from "../../../shared/config/prisma";
+import {
+  Prisma,
+  OrderStatus,
+  OfferStatus,
+  SessionStatus,
+  BundleBookingStatus,
+} from "@prisma/client";
 import { AppError } from "../../../shared/middlewares/errorHandler";
 import { OfferEventService } from "./offer-event.service";
-import { ORDER_STATUS, ORDER_TYPE } from "../../../shared/constants/order.constants";
+import {
+  ORDER_STATUS,
+  ORDER_TYPE,
+} from "../../../shared/constants/order.constants";
+import { OFFER_STATUS, OFFER_NOTIFICATION_TYPES } from "../../../shared/constants/offer.constants";
+import {
+  getIO,
+  socketEvents,
+  socketRooms,
+} from "../../../shared/config/socket";
+import { buildSupplierOrderPayload } from "../../../shared/utils/buildSupplierOrderPayload";
+import { OfferRepository } from "../repository/offer.repository";
+import { OrderRepository } from "../../order/repositories/order.repository";
+import { OrderEventService } from "../../order/services/order-event.service";
+import { SessionRepository } from "../../session/repositories/session.repository";
+import { SessionEventService } from "../../session/services/session-event.service";
+import {
+  SESSION_STATUS,
+  SESSION_CANCELLED_BY,
+  SESSION_NOTIFICATION_TYPES,
+} from "../../../shared/constants/session.constants";
+import { findTimeConflict, TimeWindow } from "../../../shared/utils/time-conflict";
+import { publishNotification } from "../../notification/notification.publisher";
+import { BUNDLE_BOOKING_ACTIVE_SLOT_STATUSES } from "../../../shared/constants/bundleBooking.constants";
+import { parseTimeToMinutes } from "../../../shared/utils/calendar";
+
+type Tx = Prisma.TransactionClient;
 
 const DAILY_START_HOUR = 9;
 const DAILY_DURATION_MINUTES = 8 * 60;
 
+const BUNDLE_ACTIVE_ENUM = BUNDLE_BOOKING_ACTIVE_SLOT_STATUSES.map(
+  (s) => s as BundleBookingStatus,
+);
+
 function normalizeDailyStart(input: Date | string): Date {
   const d = new Date(input);
-  d.setHours(DAILY_START_HOUR, 0, 0, 0);
+  d.setUTCHours(DAILY_START_HOUR, 0, 0, 0);
   return d;
 }
 
@@ -44,7 +77,6 @@ function resolveOfferSchedule(
   if (!input.timeToStart) {
     throw new AppError("timeToStart is required for contract orders", 400);
   }
-
   if (!input.estimatedDuration || input.estimatedDuration < 1) {
     throw new AppError(
       "estimatedDuration is required for contract orders and must be >= 1 minute",
@@ -58,62 +90,61 @@ function resolveOfferSchedule(
     expectedDays: null,
   };
 }
-import { OFFER_STATUS } from "../../../shared/constants/offer.constants";
-import {
-  getIO,
-  socketEvents,
-  socketRooms,
-} from "../../../shared/config/socket";
-import { buildSupplierOrderPayload } from "../../../shared/utils/buildSupplierOrderPayload";
-import { OfferRepository } from "../repository/offer.repository";
-import { OrderRepository } from "../../order/repositories/order.repository";
-import { OrderEventService } from "../../order/services/order-event.service";
-import { SessionRepository } from "../../session/repositories/session.repository";
-import { SessionEventService } from "../../session/services/session-event.service";
-import { SESSION_STATUS, SESSION_CANCELLED_BY, SESSION_NOTIFICATION_TYPES } from "../../../shared/constants/session.constants";
-import { findTimeConflict, TimeWindow } from "../../../shared/utils/time-conflict";
-import { publishNotification } from "../../notification/notification.publisher";
-import BundleBookingModel from "../../bundleBooking/models/bundleBooking.model";
-import { BUNDLE_BOOKING_ACTIVE_SLOT_STATUSES } from "../../../shared/constants/bundleBooking.constants";
-import { parseTimeToMinutes } from "../../../shared/utils/calendar";
 
-async function resolveWorkflowSteps(order: any, dbSession: any): Promise<string[]> {
-  const category = await CategoryModel.findById(order.categoryId).session(dbSession || null);
+async function resolveWorkflowSteps(order: any, tx: Tx): Promise<string[]> {
+  const category = await tx.category.findUnique({
+    where: { id: order.categoryId },
+    include: { workflows: true },
+  });
   if (!category) throw new AppError("Category not found", 404);
-  const workflow = category.workflows?.find((w) => w.key === order.selectedWorkflow);
+  const workflow = category.workflows.find((w) => w.key === order.selectedWorkflow);
   if (!workflow) throw new AppError("Workflow not found for this order's category", 400);
   return workflow.steps;
 }
 
+const userSelect = {
+  id: true,
+  firstName: true,
+  lastName: true,
+  email: true,
+  phoneNumber: true,
+  profilePicture: true,
+  address: true,
+  averageRating: true,
+  totalReviews: true,
+  role: true,
+} as const;
+
 export class OfferService {
-  private static async ensureSupplierCanCreateOffer(
-    supplierId: string,
-    dbSession?: any,
-  ) {
+  private static async ensureSupplierCanCreateOffer(supplierId: string, tx: Tx) {
     const [reviewRequiredOrder, activeSession] = await Promise.all([
-      orderModel.findOne({
-        supplierId,
-        status: ORDER_STATUS.COMPLETED,
-        supplierReviewed: false,
-      })
-        .sort({ updatedAt: -1 })
-        .session(dbSession || null),
-      sessionModel.findOne({
-        supplierId,
-        status: { $nin: [SESSION_STATUS.COMPLETED, SESSION_STATUS.CANCELLED] },
-      }).session(dbSession || null),
+      tx.order.findFirst({
+        where: {
+          supplierId,
+          status: OrderStatus.completed,
+          supplierReviewed: false,
+        },
+        orderBy: { updatedAt: "desc" },
+      }),
+      tx.jobSession.findFirst({
+        where: {
+          supplierId,
+          status: { notIn: [SessionStatus.completed, SessionStatus.cancelled] },
+        },
+      }),
     ]);
 
     if (reviewRequiredOrder) {
-      const session = await sessionModel
-        .findOne({ orderId: reviewRequiredOrder._id })
-        .session(dbSession || null);
+      const session = await tx.jobSession.findFirst({
+        where: { orderId: reviewRequiredOrder.id },
+      });
 
       let customer = null;
       if (session?.customerId) {
-        customer = await UserModel.findById(session.customerId).select(
-          "-password -refreshToken -biometrics",
-        );
+        customer = await tx.user.findUnique({
+          where: { id: session.customerId },
+          select: userSelect,
+        });
       }
 
       const error = new AppError(
@@ -121,7 +152,7 @@ export class OfferService {
         403,
       );
       (error as any).reviewRequired = true;
-      (error as any).order = { ...reviewRequiredOrder.toObject(), customer };
+      (error as any).order = { ...reviewRequiredOrder, customer };
       throw error;
     }
 
@@ -137,25 +168,29 @@ export class OfferService {
     supplierId: string,
     timeToStart: Date,
     estimatedDuration: number,
-    excludeOfferId?: string,
-    dbSession?: any,
+    excludeOfferId: string | undefined,
+    tx: Tx,
   ) {
     const dateStr = timeToStart.toISOString().split("T")[0];
 
     const [offerWindows, bundleBookings] = await Promise.all([
-      OfferRepository.findSupplierScheduledWindows(supplierId, excludeOfferId, dbSession),
-      BundleBookingModel.find({
-        supplierId,
-        bookedDate: dateStr,
-        status: { $in: [...BUNDLE_BOOKING_ACTIVE_SLOT_STATUSES] },
-      }).session(dbSession || null),
+      OfferRepository.findSupplierScheduledWindows(supplierId, excludeOfferId, tx),
+      tx.bundleBooking.findMany({
+        where: {
+          supplierId,
+          bookedDate: dateStr,
+          status: { in: BUNDLE_ACTIVE_ENUM },
+        },
+      }),
     ]);
 
-    const mapped: TimeWindow[] = offerWindows.map((w: any) => ({
-      start: w.timeToStart,
-      durationMinutes: w.estimatedDuration,
-      referenceId: w._id.toString(),
-    }));
+    const mapped: TimeWindow[] = offerWindows
+      .filter((w) => w.timeToStart && w.estimatedDuration)
+      .map((w) => ({
+        start: w.timeToStart!,
+        durationMinutes: w.estimatedDuration!,
+        referenceId: w.id,
+      }));
 
     for (const b of bundleBookings) {
       const slotStartMin = parseTimeToMinutes(b.slotStart);
@@ -166,7 +201,7 @@ export class OfferService {
       mapped.push({
         start,
         durationMinutes: slotEndMin - slotStartMin,
-        referenceId: (b._id as any).toString(),
+        referenceId: b.id,
       });
     }
 
@@ -177,24 +212,28 @@ export class OfferService {
     customerId: string,
     timeToStart: Date,
     estimatedDuration: number,
-    dbSession?: any,
+    tx: Tx,
   ) {
     const dateStr = timeToStart.toISOString().split("T")[0];
 
     const [orderWindows, bundleBookings] = await Promise.all([
-      OrderRepository.findCustomerScheduledWindows(customerId, dbSession),
-      BundleBookingModel.find({
-        customerId,
-        bookedDate: dateStr,
-        status: { $in: [...BUNDLE_BOOKING_ACTIVE_SLOT_STATUSES] },
-      }).session(dbSession || null),
+      OrderRepository.findCustomerScheduledWindows(customerId, tx),
+      tx.bundleBooking.findMany({
+        where: {
+          customerId,
+          bookedDate: dateStr,
+          status: { in: BUNDLE_ACTIVE_ENUM },
+        },
+      }),
     ]);
 
-    const mapped: TimeWindow[] = orderWindows.map((w: any) => ({
-      start: w.scheduledAt,
-      durationMinutes: w.estimatedDuration,
-      referenceId: w._id.toString(),
-    }));
+    const mapped: TimeWindow[] = orderWindows
+      .filter((w) => w.scheduledAt && w.estimatedDuration)
+      .map((w) => ({
+        start: w.scheduledAt!,
+        durationMinutes: w.estimatedDuration!,
+        referenceId: w.id,
+      }));
 
     for (const b of bundleBookings) {
       const slotStartMin = parseTimeToMinutes(b.slotStart);
@@ -205,25 +244,11 @@ export class OfferService {
       mapped.push({
         start,
         durationMinutes: slotEndMin - slotStartMin,
-        referenceId: (b._id as any).toString(),
+        referenceId: b.id,
       });
     }
 
     return findTimeConflict(mapped, timeToStart, estimatedDuration);
-  }
-
-  private static async validateOrderForOfferCreation(orderId: string) {
-    const order = await orderModel.findById(orderId);
-
-    if (!order) {
-      throw new AppError("Order not found", 404);
-    }
-
-    if (order.status !== ORDER_STATUS.PENDING) {
-      throw new AppError("Only pending orders can receive offers", 400);
-    }
-
-    return order;
   }
 
   static async createOffer(input: {
@@ -240,29 +265,17 @@ export class OfferService {
       throw new AppError("Offer amount must be greater than 0", 400);
     }
 
-    const dbSession = await mongoose.startSession();
-    let order: any;
-    let offer: any;
-    let created = false;
+    const result = await prisma
+      .$transaction(async (tx) => {
+        await this.ensureSupplierCanCreateOffer(supplierId, tx);
 
-    try {
-      await dbSession.withTransaction(async () => {
-        await this.ensureSupplierCanCreateOffer(supplierId, dbSession);
-
-        order = await orderModel.findById(orderId).session(dbSession || null);
-        if (!order) {
-          throw new AppError("Order not found", 404);
-        }
-
-        if (order.status !== ORDER_STATUS.PENDING) {
+        const order = await tx.order.findUnique({ where: { id: orderId } });
+        if (!order) throw new AppError("Order not found", 404);
+        if (order.status !== OrderStatus.pending) {
           throw new AppError("Cannot create offer for this order now", 400);
         }
-
-        if (order.customerId.toString() === supplierId) {
-          throw new AppError(
-            "You cannot create an offer on your own order",
-            400,
-          );
+        if (order.customerId === supplierId) {
+          throw new AppError("You cannot create an offer on your own order", 400);
         }
 
         const schedule = resolveOfferSchedule(order, {
@@ -277,7 +290,7 @@ export class OfferService {
             schedule.timeToStart,
             schedule.estimatedDuration,
             undefined,
-            dbSession,
+            tx,
           );
           if (conflict) {
             throw new AppError(
@@ -287,16 +300,18 @@ export class OfferService {
           }
         }
 
-        const existingOffer =
-          await OfferRepository.findPendingOfferBySupplierAndOrder(
-            supplierId,
-            orderId,
-            dbSession,
-          );
+        const existingOffer = await OfferRepository.findPendingOfferBySupplierAndOrder(
+          supplierId,
+          orderId,
+          tx,
+        );
+
+        let offer: any;
+        let created: boolean;
 
         if (existingOffer) {
           offer = await OfferRepository.updatePendingOffer(
-            existingOffer._id,
+            existingOffer.id,
             {
               amount,
               estimatedDuration: schedule.estimatedDuration,
@@ -304,7 +319,7 @@ export class OfferService {
               timeToStart: schedule.timeToStart,
               expiresAt: null,
             },
-            dbSession,
+            tx,
           );
           created = false;
         } else {
@@ -317,32 +332,34 @@ export class OfferService {
               expectedDays: schedule.expectedDays,
               timeToStart: schedule.timeToStart,
               expiresAt: null,
-              status: OFFER_STATUS.PENDING,
+              status: OfferStatus.pending,
             },
-            dbSession,
+            tx,
           );
           created = true;
         }
+
+        return { offer, order, created };
+      })
+      .catch((error: any) => {
+        if (error?.code === "P2002") {
+          throw new AppError(
+            "A pending offer for this order already exists for this supplier.",
+            409,
+          );
+        }
+        throw error;
       });
-    } catch (error: any) {
-      if (error?.code === 11000) {
-        throw new AppError(
-          "A pending offer for this order already exists for this supplier.",
-          409,
-        );
-      }
-      throw error;
-    } finally {
-      await dbSession.endSession();
-    }
+
+    const { offer, order, created } = result;
 
     const payload = created
       ? await OfferEventService.emitOfferCreatedToCustomer({
-          customerId: order.customerId.toString(),
+          customerId: order.customerId,
           offer,
         })
       : await OfferEventService.emitOfferUpdatedToCustomer({
-          customerId: order.customerId.toString(),
+          customerId: order.customerId,
           offer,
         });
 
@@ -351,24 +368,31 @@ export class OfferService {
       created
         ? socketEvents.SUPPLIER_OFFER_CREATED
         : socketEvents.SUPPLIER_OFFER_UPDATED,
-      {
-        offer: payload,
-        timestamp: new Date(),
-      },
+      { offer: payload, timestamp: new Date() },
     );
+
+    const notifyCustomer = created
+      ? OfferEventService.notifyCustomerNewOffer({
+          customerId: order.customerId,
+          orderId: order.id,
+          offerId: offer.id,
+          supplierId,
+          amount,
+          estimatedDuration: offer.estimatedDuration ?? null,
+          timeToStart: offer.timeToStart ?? null,
+        })
+      : OfferEventService.notifyCustomerOfferUpdated({
+          customerId: order.customerId,
+          orderId: order.id,
+          offerId: offer.id,
+          supplierId,
+          amount,
+        });
 
     await Promise.all([
       OfferEventService.emitSupplierPendingCountUpdate(supplierId),
       OfferEventService.emitSupplierPendingOffersList(supplierId),
-      OfferEventService.notifyCustomerNewOffer({
-        customerId: order.customerId.toString(),
-        orderId: order._id.toString(),
-        offerId: offer._id.toString(),
-        supplierId,
-        amount,
-        estimatedDuration: offer.estimatedDuration ?? null,
-        timeToStart: offer.timeToStart ?? null,
-      }),
+      notifyCustomer,
     ]);
 
     return {
@@ -384,90 +408,68 @@ export class OfferService {
   static async acceptOffer(input: { offerId: string; customerId: string }) {
     const { offerId, customerId } = input;
 
-    const dbSession = await mongoose.startSession();
-    let offer: any;
-    let order: any;
-    let sessionDoc: any;
-    let supplierOtherPendingOffers: any[] = [];
-    let rejectedOrderOffers: any[] = [];
-
-    try {
-      await dbSession.withTransaction(async () => {
-        const existingOffer = await OfferRepository.findById(
-          offerId,
-          dbSession,
-        );
-
-        if (!existingOffer) {
-          throw new AppError("Offer not found", 404);
-        }
-
-        if (existingOffer.status !== OFFER_STATUS.PENDING) {
+    const result = await prisma
+      .$transaction(async (tx) => {
+        const existingOffer = await OfferRepository.findById(offerId, tx);
+        if (!existingOffer) throw new AppError("Offer not found", 404);
+        if (existingOffer.status !== OfferStatus.pending) {
           throw new AppError("Offer not found or already processed", 409);
         }
 
-        order = await orderModel.findById(existingOffer.orderId).session(
-          dbSession || null,
-        );
-
-        if (!order) {
-          throw new AppError("Associated order not found", 404);
+        const order = await tx.order.findUnique({
+          where: { id: existingOffer.orderId },
+        });
+        if (!order) throw new AppError("Associated order not found", 404);
+        if (order.customerId !== customerId) throw new AppError("Not allowed", 403);
+        if (order.status !== OrderStatus.pending) {
+          throw new AppError("Order is not available for offer acceptance", 409);
         }
 
-        if (order.customerId.toString() !== customerId) {
-          throw new AppError("Not allowed", 403);
-        }
+        const offer = await OfferRepository.acceptPendingOffer(offerId, tx);
+        if (!offer) throw new AppError("Offer not found or already processed", 409);
 
-        if (order.status !== ORDER_STATUS.PENDING) {
-          throw new AppError(
-            "Order is not available for offer acceptance",
-            409,
-          );
-        }
-
-        offer = await OfferRepository.acceptPendingOffer(offerId, dbSession);
-        if (!offer) {
-          throw new AppError("Offer not found or already processed", 409);
-        }
-
-        supplierOtherPendingOffers =
+        const supplierOtherPendingOffers =
           await OfferRepository.findSupplierOtherPendingOffers(
             offer.supplierId,
-            offer._id,
-            dbSession,
+            offer.id,
+            tx,
           );
 
-        rejectedOrderOffers = await OfferRepository.findPendingOffersByOrder(
-          order._id,
-          dbSession,
+        const rejectedOrderOffers = await OfferRepository.findPendingOffersByOrder(
+          order.id,
+          tx,
         );
 
         await OfferRepository.rejectOtherPendingOffersForSupplier(
           offer.supplierId,
-          offer._id,
-          dbSession,
+          offer.id,
+          tx,
         );
 
-        await OfferRepository.rejectOtherOffersForOrder(
-          order._id,
-          offer._id,
-          dbSession,
-        );
+        await OfferRepository.rejectOtherOffersForOrder(order.id, offer.id, tx);
 
         const offerStartTime: Date | null = offer.timeToStart
           ? new Date(offer.timeToStart)
           : null;
         const isScheduled = offerStartTime && offerStartTime > new Date();
 
-        if (isScheduled) {
-          const duration = offer.estimatedDuration ?? 60;
+        let sessionDoc: any = null;
 
+        if (isScheduled && offerStartTime) {
+          const duration = offer.estimatedDuration ?? 60;
           const [supplierConflict, customerConflict] = await Promise.all([
             this.checkSupplierTimeConflict(
-              offer.supplierId.toString(), offerStartTime, duration, offer._id.toString(), dbSession,
+              offer.supplierId,
+              offerStartTime,
+              duration,
+              offer.id,
+              tx,
             ),
             this.checkCustomerTimeConflict(
-              order.customerId.toString(), offerStartTime, duration, dbSession,
+              order.customerId,
+              offerStartTime,
+              duration,
+              tx,
             ),
           ]);
 
@@ -485,81 +487,84 @@ export class OfferService {
           }
 
           const updatedOrder = await OrderRepository.markScheduled(
-            order._id, offer.supplierId, offer.amount,
-            offerStartTime, offer.estimatedDuration ?? null, dbSession,
+            order.id,
+            offer.supplierId,
+            Number(offer.amount),
+            offerStartTime,
+            offer.estimatedDuration ?? null,
+            tx,
           );
-
-          if (!updatedOrder) {
-            throw new AppError("Order state changed concurrently", 409);
-          }
+          if (!updatedOrder) throw new AppError("Order state changed concurrently", 409);
         } else {
           const updatedOrder = await OrderRepository.markInProgress(
-            order._id, offer.supplierId, offer.amount, dbSession,
+            order.id,
+            offer.supplierId,
+            Number(offer.amount),
+            tx,
           );
+          if (!updatedOrder) throw new AppError("Order state changed concurrently", 409);
 
-          if (!updatedOrder) {
-            throw new AppError("Order state changed concurrently", 409);
-          }
-
-          const workflowSteps = await resolveWorkflowSteps(order, dbSession);
+          const workflowSteps = await resolveWorkflowSteps(order, tx);
 
           sessionDoc = await SessionRepository.createSession(
             {
-              orderId: order._id,
-              offerId: offer._id,
+              orderId: order.id,
+              offerId: offer.id,
               customerId: order.customerId,
               supplierId: offer.supplierId,
               workflowSteps,
               status: SESSION_STATUS.STARTED,
               startedAt: new Date(),
             },
-            dbSession,
+            tx,
           );
         }
+
+        return { offer, order, sessionDoc, supplierOtherPendingOffers, rejectedOrderOffers };
+      })
+      .catch((error: any) => {
+        if (error?.code === "P2002") {
+          throw new AppError(
+            "This offer or supplier active job state changed. Please refresh and try again.",
+            409,
+          );
+        }
+        throw error;
       });
-    } catch (error: any) {
-      if (error?.code === 11000) {
-        throw new AppError(
-          "This offer or supplier active job state changed. Please refresh and try again.",
-          409,
-        );
-      }
-      throw error;
-    } finally {
-      await dbSession.endSession();
-    }
+
+    const { offer, order, sessionDoc, supplierOtherPendingOffers } = result;
 
     const io = getIO();
     const isScheduled = !sessionDoc;
 
-    const orderPayload = await buildSupplierOrderPayload(order._id.toString());
+    const orderPayload = await buildSupplierOrderPayload(order.id);
     const sessionPayload = sessionDoc
       ? {
-          _id: sessionDoc._id.toString(),
-          orderId: sessionDoc.orderId.toString(),
-          offerId: sessionDoc.offerId.toString(),
-          customerId: sessionDoc.customerId.toString(),
-          supplierId: sessionDoc.supplierId.toString(),
+          _id: sessionDoc.id,
+          orderId: sessionDoc.orderId,
+          offerId: sessionDoc.offerId,
+          customerId: sessionDoc.customerId,
+          supplierId: sessionDoc.supplierId,
           status: sessionDoc.status,
         }
       : null;
 
     const offerMeta = {
-      _id: offer._id.toString(),
-      orderId: offer.orderId.toString(),
-      supplierId: offer.supplierId.toString(),
+      _id: offer.id,
+      orderId: offer.orderId,
+      supplierId: offer.supplierId,
       amount: offer.amount,
       status: offer.status,
       scheduledAt: offer.timeToStart || null,
       estimatedDuration: offer.estimatedDuration || null,
     };
 
-    [offer.supplierId.toString(), order.customerId.toString()].forEach((uid) => {
+    [offer.supplierId, order.customerId].forEach((uid) => {
       io.to(socketRooms.user(uid)).emit(socketEvents.OFFER_ACCEPTED, {
-        offerId: offer._id.toString(),
-        orderId: offer.orderId.toString(),
-        supplierId: offer.supplierId.toString(),
-        sessionId: sessionDoc?._id?.toString() || null,
+        offerId: offer.id,
+        orderId: offer.orderId,
+        supplierId: offer.supplierId,
+        sessionId: sessionDoc?.id || null,
         isScheduled,
         scheduledAt: offer.timeToStart || null,
         order: orderPayload,
@@ -569,7 +574,7 @@ export class OfferService {
     });
 
     if (!isScheduled) {
-      [order.customerId.toString(), offer.supplierId.toString()].forEach((uid) => {
+      [order.customerId, offer.supplierId].forEach((uid) => {
         io.to(socketRooms.user(uid)).emit(socketEvents.SESSION_CREATED, {
           session: sessionPayload,
           order: orderPayload,
@@ -580,47 +585,49 @@ export class OfferService {
     }
 
     for (const pendingOffer of supplierOtherPendingOffers) {
-      const pendingOrder = await orderModel.findById(pendingOffer.orderId);
+      const pendingOrder = await prisma.order.findUnique({
+        where: { id: pendingOffer.orderId },
+      });
       if (!pendingOrder) continue;
 
-      io.to(socketRooms.user(pendingOrder.customerId.toString())).emit(
+      io.to(socketRooms.user(pendingOrder.customerId)).emit(
         socketEvents.OFFER_DELETED,
         {
-          offerId: pendingOffer._id.toString(),
-          orderId: pendingOffer.orderId.toString(),
-          supplierId: offer.supplierId.toString(),
+          offerId: pendingOffer.id,
+          orderId: pendingOffer.orderId,
+          supplierId: offer.supplierId,
           message: "Supplier withdrew their offer as they accepted another job",
-          acceptedOrderId: order._id.toString(),
+          acceptedOrderId: order.id,
           timestamp: new Date(),
         },
       );
     }
 
     await Promise.all([
-      OfferEventService.emitSupplierPendingCountUpdate(offer.supplierId.toString()),
-      OfferEventService.emitSupplierPendingOffersList(offer.supplierId.toString()),
+      OfferEventService.emitSupplierPendingCountUpdate(offer.supplierId),
+      OfferEventService.emitSupplierPendingOffersList(offer.supplierId),
       OfferEventService.notifySupplierOfferAccepted({
-        supplierId: offer.supplierId.toString(),
-        orderId: order._id.toString(),
-        offerId: offer._id.toString(),
-        sessionId: sessionDoc?._id?.toString() || null,
-        withdrawnOrderIds: supplierOtherPendingOffers.map((o) => o.orderId.toString()),
+        supplierId: offer.supplierId,
+        orderId: order.id,
+        offerId: offer.id,
+        sessionId: sessionDoc?.id || null,
+        withdrawnOrderIds: supplierOtherPendingOffers.map((o: any) => o.orderId),
       }),
       isScheduled
         ? Promise.all([
             publishNotification({
-              userId: order.customerId.toString(),
+              userId: order.customerId,
               type: SESSION_NOTIFICATION_TYPES.SESSION_SCHEDULED,
               title: "Job Scheduled",
               message: `Your job has been scheduled for ${offer.timeToStart?.toISOString()}.`,
-              data: { orderId: order._id.toString(), offerId: offer._id.toString(), scheduledAt: offer.timeToStart },
+              data: { orderId: order.id, offerId: offer.id, scheduledAt: offer.timeToStart },
             }),
             publishNotification({
-              userId: offer.supplierId.toString(),
+              userId: offer.supplierId,
               type: SESSION_NOTIFICATION_TYPES.SESSION_SCHEDULED,
               title: "Job Scheduled",
               message: `You have a scheduled job on ${offer.timeToStart?.toISOString()}.`,
-              data: { orderId: order._id.toString(), offerId: offer._id.toString(), scheduledAt: offer.timeToStart },
+              data: { orderId: order.id, offerId: offer.id, scheduledAt: offer.timeToStart },
             }),
           ])
         : SessionEventService.notifySessionCreated(sessionDoc),
@@ -628,13 +635,15 @@ export class OfferService {
 
     return {
       success: true,
-      message: isScheduled ? "Offer accepted and job scheduled" : "Offer accepted successfully",
+      message: isScheduled
+        ? "Offer accepted and job scheduled"
+        : "Offer accepted successfully",
       isScheduled,
       scheduledAt: isScheduled ? offer.timeToStart : null,
       offer: {
-        _id: offer._id.toString(),
-        orderId: offer.orderId.toString(),
-        supplierId: offer.supplierId.toString(),
+        _id: offer.id,
+        orderId: offer.orderId,
+        supplierId: offer.supplierId,
         amount: offer.amount,
         status: offer.status,
       },
@@ -642,7 +651,7 @@ export class OfferService {
       order: orderPayload,
       withdrawnOffers: {
         count: supplierOtherPendingOffers.length,
-        orders: supplierOtherPendingOffers.map((o) => o.orderId.toString()),
+        orders: supplierOtherPendingOffers.map((o: any) => o.orderId),
       },
     };
   }
@@ -650,65 +659,44 @@ export class OfferService {
   static async rejectOffer(input: { offerId: string; customerId: string }) {
     const { offerId, customerId } = input;
 
-    const dbSession = await mongoose.startSession();
-    let rejectedOffer: any;
-    let order: any;
+    const result = await prisma.$transaction(async (tx) => {
+      const offer = await OfferRepository.findById(offerId, tx);
+      if (!offer) throw new AppError("Offer not found", 404);
 
-    try {
-      await dbSession.withTransaction(async () => {
-        const offer = await OfferRepository.findById(offerId, dbSession);
-        if (!offer) {
-          throw new AppError("Offer not found", 404);
-        }
+      const order = await tx.order.findUnique({ where: { id: offer.orderId } });
+      if (!order) throw new AppError("Associated order not found", 404);
+      if (order.customerId !== customerId) throw new AppError("Not allowed", 403);
+      if (order.status !== OrderStatus.pending) {
+        throw new AppError("Cannot reject offer for this order now", 400);
+      }
 
-        order = await orderModel.findById(offer.orderId).session(dbSession);
-        if (!order) {
-          throw new AppError("Associated order not found", 404);
-        }
+      const rejectedOffer = await OfferRepository.rejectPendingOffer(offerId, tx);
+      if (!rejectedOffer) throw new AppError("Offer not found or already processed", 409);
 
-        if (order.customerId.toString() !== customerId) {
-          throw new AppError("Not allowed", 403);
-        }
+      return { rejectedOffer, order };
+    });
 
-        if (order.status !== ORDER_STATUS.PENDING) {
-          throw new AppError("Cannot reject offer for this order now", 400);
-        }
-
-        rejectedOffer = await OfferRepository.rejectPendingOffer(offerId, dbSession);
-        if (!rejectedOffer) {
-          throw new AppError("Offer not found or already processed", 409);
-        }
-      });
-    } finally {
-      await dbSession.endSession();
-    }
-
+    const { rejectedOffer } = result;
     const io = getIO();
 
-    io.to(socketRooms.user(rejectedOffer.supplierId.toString())).emit(
+    io.to(socketRooms.user(rejectedOffer.supplierId)).emit(
       socketEvents.OFFER_REJECTED,
       {
-        offerId: rejectedOffer._id.toString(),
-        orderId: rejectedOffer.orderId.toString(),
+        offerId: rejectedOffer.id,
+        orderId: rejectedOffer.orderId,
         reason: "customer_rejected",
         timestamp: new Date(),
       },
     );
 
     await Promise.all([
-      OfferEventService.emitSupplierPendingCountUpdate(
-        rejectedOffer.supplierId.toString(),
-      ),
-      OfferEventService.emitSupplierPendingOffersList(
-        rejectedOffer.supplierId.toString(),
-      ),
-      OfferEventService.emitOrderAvailableAgain(
-        rejectedOffer.orderId.toString(),
-      ),
+      OfferEventService.emitSupplierPendingCountUpdate(rejectedOffer.supplierId),
+      OfferEventService.emitSupplierPendingOffersList(rejectedOffer.supplierId),
+      OfferEventService.emitOrderAvailableAgain(rejectedOffer.orderId),
       OfferEventService.notifySupplierOfferRejected({
-        supplierId: rejectedOffer.supplierId.toString(),
-        offerId: rejectedOffer._id.toString(),
-        orderId: rejectedOffer.orderId.toString(),
+        supplierId: rejectedOffer.supplierId,
+        offerId: rejectedOffer.id,
+        orderId: rejectedOffer.orderId,
       }),
     ]);
 
@@ -719,35 +707,18 @@ export class OfferService {
     };
   }
 
-  static async deleteOffer(input: { offerId: string; supplierId: string }) {
-    const { offerId, supplierId } = input;
+  static async deleteOffer(input: { offerId: string; supplierId: string; reason: string }) {
+    const { offerId, supplierId, reason } = input;
 
-    const dbSession = await mongoose.startSession();
-
-    let deletedOffer: any = null;
-    let relatedOrder: any = null;
-    let relatedSession: any = null;
-    let flowType: "pending_withdraw" | "accepted_cancel" | "scheduled_cancel" | null = null;
-
-    try {
-      await dbSession.withTransaction(async () => {
-        const existingOffer = await OfferRepository.findById(
-          offerId,
-          dbSession,
-        );
-
-        if (!existingOffer) {
-          throw new AppError("Offer not found", 404);
-        }
-
-        if (existingOffer.supplierId.toString() !== supplierId) {
-          throw new AppError("Not allowed", 403);
-        }
+    const result = await prisma
+      .$transaction(async (tx) => {
+        const existingOffer = await OfferRepository.findById(offerId, tx);
+        if (!existingOffer) throw new AppError("Offer not found", 404);
+        if (existingOffer.supplierId !== supplierId) throw new AppError("Not allowed", 403);
 
         if (
-          ![OFFER_STATUS.PENDING, OFFER_STATUS.ACCEPTED].includes(
-            existingOffer.status as any,
-          )
+          existingOffer.status !== OfferStatus.pending &&
+          existingOffer.status !== OfferStatus.accepted
         ) {
           throw new AppError(
             "Only pending or accepted offers can be withdrawn by supplier",
@@ -755,113 +726,106 @@ export class OfferService {
           );
         }
 
-        relatedOrder = await orderModel.findById(existingOffer.orderId).session(
-          dbSession || null,
-        );
+        const relatedOrder = await tx.order.findUnique({
+          where: { id: existingOffer.orderId },
+        });
+        if (!relatedOrder) throw new AppError("Associated order not found", 404);
 
-        if (!relatedOrder) {
-          throw new AppError("Associated order not found", 404);
-        }
-
-        if (existingOffer.status === OFFER_STATUS.PENDING) {
-          deletedOffer = await OfferRepository.withdrawPendingOfferBySupplier(
+        if (existingOffer.status === OfferStatus.pending) {
+          const deletedOffer = await OfferRepository.withdrawPendingOfferBySupplier(
             offerId,
             supplierId,
-            dbSession,
+            reason,
+            tx,
           );
-
           if (!deletedOffer) {
             throw new AppError(
               "Offer not found, not owned by supplier, or cannot be withdrawn",
               404,
             );
           }
-
-          flowType = "pending_withdraw";
-          return;
+          return {
+            deletedOffer,
+            relatedOrder,
+            relatedSession: null,
+            flowType: "pending_withdraw" as const,
+          };
         }
 
-        // accepted offer flow
-        const isScheduledOrder = relatedOrder.status === ORDER_STATUS.SCHEDULED;
+        const isScheduledOrder = relatedOrder.status === OrderStatus.scheduled;
+        let relatedSession: any = null;
 
         if (!isScheduledOrder) {
-          // IN_PROGRESS — may have an active session
-          const activeRelatedSession = await sessionModel
-            .findOne({
-              offerId: existingOffer._id,
-              status: {
-                $nin: [SESSION_STATUS.COMPLETED, SESSION_STATUS.CANCELLED],
-              },
-            })
-            .session(dbSession || null);
+          const activeRelatedSession = await tx.jobSession.findFirst({
+            where: {
+              offerId: existingOffer.id,
+              status: { notIn: [SessionStatus.completed, SessionStatus.cancelled] },
+            },
+          });
 
           if (activeRelatedSession) {
             const cancelled = await SessionRepository.markCancelled(
-              activeRelatedSession._id,
+              activeRelatedSession.id,
               activeRelatedSession.status,
               SESSION_CANCELLED_BY.SUPPLIER,
               "supplier_deleted_accepted_offer",
-              dbSession,
+              tx,
             );
             relatedSession = cancelled || activeRelatedSession;
-            relatedSession.status = SESSION_STATUS.CANCELLED;
-            relatedSession.cancelledBy = SESSION_CANCELLED_BY.SUPPLIER;
-            relatedSession.cancellationReason = "supplier_deleted_accepted_offer";
           }
         }
 
-        deletedOffer = await OfferRepository.withdrawAcceptedOfferBySupplier(
+        const deletedOffer = await OfferRepository.withdrawAcceptedOfferBySupplier(
           offerId,
           supplierId,
-          dbSession,
+          reason,
+          tx,
         );
+        if (!deletedOffer) throw new AppError("Accepted offer could not be withdrawn", 409);
 
-        if (!deletedOffer) {
-          throw new AppError("Accepted offer could not be withdrawn", 409);
+        const resetOrder = await OrderRepository.resetToPending(relatedOrder.id, tx);
+        if (!resetOrder) throw new AppError("Order state changed concurrently", 409);
+
+        return {
+          deletedOffer,
+          relatedOrder,
+          relatedSession,
+          flowType: isScheduledOrder
+            ? ("scheduled_cancel" as const)
+            : ("accepted_cancel" as const),
+        };
+      })
+      .catch((error: any) => {
+        if (error?.code === "P2002") {
+          throw new AppError(
+            "State changed while withdrawing the offer. Please refresh and try again.",
+            409,
+          );
         }
-
-        const resetOrder = await OrderRepository.resetToPending(relatedOrder._id, dbSession);
-        if (!resetOrder) {
-          throw new AppError("Order state changed concurrently", 409);
-        }
-
-        flowType = isScheduledOrder ? "scheduled_cancel" : "accepted_cancel";
+        throw error;
       });
-    } catch (error: any) {
-      if (error?.code === 11000) {
-        throw new AppError(
-          "State changed while withdrawing the offer. Please refresh and try again.",
-          409,
-        );
-      }
-      throw error;
-    } finally {
-      await dbSession.endSession();
-    }
 
+    const { deletedOffer, relatedOrder, relatedSession, flowType } = result;
     const io = getIO();
 
     if (flowType === "pending_withdraw") {
-      io.to(socketRooms.user(relatedOrder.customerId.toString())).emit(
+      io.to(socketRooms.user(relatedOrder.customerId)).emit(
         socketEvents.OFFER_DELETED,
         {
-          offerId: deletedOffer._id.toString(),
-          orderId: deletedOffer.orderId.toString(),
+          offerId: deletedOffer.id,
+          orderId: deletedOffer.orderId,
           supplierId,
           message: "A supplier has withdrawn their offer",
           timestamp: new Date(),
         },
       );
 
-      io.to(socketRooms.user(supplierId)).emit(
-        socketEvents.SUPPLIER_OFFER_WITHDRAWN,
-        {
-          offerId: deletedOffer._id.toString(),
-          orderId: deletedOffer.orderId.toString(),
-          reason: "user_deleted",
-          timestamp: new Date(),
-        },
-      );
+      io.to(socketRooms.user(supplierId)).emit(socketEvents.SUPPLIER_OFFER_WITHDRAWN, {
+        offerId: deletedOffer.id,
+        orderId: deletedOffer.orderId,
+        reason: "user_deleted",
+        timestamp: new Date(),
+      });
 
       await Promise.all([
         OfferEventService.emitSupplierPendingCountUpdate(supplierId),
@@ -871,10 +835,7 @@ export class OfferService {
       return {
         success: true,
         message: "Offer withdrawn successfully",
-        data: {
-          offerId: deletedOffer._id.toString(),
-          orderId: deletedOffer.orderId.toString(),
-        },
+        data: { offerId: deletedOffer.id, orderId: deletedOffer.orderId },
       };
     }
 
@@ -886,15 +847,15 @@ export class OfferService {
       });
       await SessionEventService.notifySessionCancelled(
         relatedSession,
-        SESSION_CANCELLED_BY.SUPPLIER,
+        SESSION_CANCELLED_BY.SUPPLIER as "supplier",
       );
     }
 
-    io.to(socketRooms.user(relatedOrder.customerId.toString())).emit(
+    io.to(socketRooms.user(relatedOrder.customerId)).emit(
       socketEvents.OFFER_DELETED,
       {
-        offerId: deletedOffer._id.toString(),
-        orderId: deletedOffer.orderId.toString(),
+        offerId: deletedOffer.id,
+        orderId: deletedOffer.orderId,
         supplierId,
         message: "The supplier cancelled the accepted offer",
         reason: "supplier_deleted_accepted_offer",
@@ -902,21 +863,18 @@ export class OfferService {
       },
     );
 
-    io.to(socketRooms.user(supplierId)).emit(
-      socketEvents.SUPPLIER_OFFER_WITHDRAWN,
-      {
-        offerId: deletedOffer._id.toString(),
-        orderId: deletedOffer.orderId.toString(),
-        reason: "supplier_deleted_accepted_offer",
-        timestamp: new Date(),
-      },
-    );
+    io.to(socketRooms.user(supplierId)).emit(socketEvents.SUPPLIER_OFFER_WITHDRAWN, {
+      offerId: deletedOffer.id,
+      orderId: deletedOffer.orderId,
+      reason: "supplier_deleted_accepted_offer",
+      timestamp: new Date(),
+    });
 
     await Promise.all([
       OrderEventService.emitOrderAvailableAgain(
-        relatedOrder._id.toString(),
-        relatedOrder.categoryId.toString(),
-        relatedOrder.governmentId.toString(),
+        relatedOrder.id,
+        relatedOrder.categoryId,
+        relatedOrder.governmentId,
         "supplier_deleted_accepted_offer",
       ),
       OfferEventService.emitSupplierPendingCountUpdate(supplierId),
@@ -925,13 +883,14 @@ export class OfferService {
 
     return {
       success: true,
-      message: flowType === "scheduled_cancel"
-        ? "Scheduled booking cancelled, offer withdrawn, and order returned to pending"
-        : "Accepted offer withdrawn, session cancelled, and order returned to pending",
+      message:
+        flowType === "scheduled_cancel"
+          ? "Scheduled booking cancelled, offer withdrawn, and order returned to pending"
+          : "Accepted offer withdrawn, session cancelled, and order returned to pending",
       data: {
-        offerId: deletedOffer._id.toString(),
-        orderId: deletedOffer.orderId.toString(),
-        sessionId: relatedSession?._id?.toString() || null,
+        offerId: deletedOffer.id,
+        orderId: deletedOffer.orderId,
+        sessionId: relatedSession?.id || null,
         orderStatus: ORDER_STATUS.PENDING,
         sessionStatus: relatedSession ? SESSION_STATUS.CANCELLED : null,
       },
@@ -945,125 +904,104 @@ export class OfferService {
   }) {
     const { orderId, userId, role } = input;
 
-    const order = await orderModel.findById(orderId);
-    if (!order) {
-      throw new AppError("Order not found", 404);
-    }
+    const order = await prisma.order.findUnique({ where: { id: orderId } });
+    if (!order) throw new AppError("Order not found", 404);
 
-    if (role === "customer" && order.customerId.toString() !== userId) {
+    if (role === "customer" && order.customerId !== userId) {
+      throw new AppError("Not allowed", 403);
+    }
+    if (role === "supplier" && order.customerId === userId) {
       throw new AppError("Not allowed", 403);
     }
 
-    if (role === "supplier" && order.customerId.toString() === userId) {
-      throw new AppError("Not allowed", 403);
-    }
-
-    const offers = role === "supplier"
-      ? await OfferRepository.findSupplierOfferForOrder(orderId, userId)
-      : await OfferRepository.findOrderOffers(orderId);
+    const offers =
+      role === "supplier"
+        ? await OfferRepository.findSupplierOfferForOrder(orderId, userId)
+        : await OfferRepository.findOrderOffers(orderId);
 
     const enrichedOffers = await Promise.all(
-      offers.map(async (offer: any) => {
-        const supplier = await UserModel.findById(offer.supplierId).select(
-          "-password -refreshToken -biometrics",
-        );
-
-        return {
-          ...offer.toObject(),
-          supplier: supplier || null,
-        };
+      offers.map(async (offer) => {
+        const supplier = await prisma.user.findUnique({
+          where: { id: offer.supplierId },
+          select: userSelect,
+        });
+        return { ...offer, supplier: supplier || null };
       }),
     );
 
-    return {
-      success: true,
-      data: enrichedOffers,
-    };
+    return { success: true, data: enrichedOffers };
   }
 
-  static async acceptOrderDirect(input: {
-    orderId: string;
-    supplierId: string;
-  }) {
+  static async acceptOrderDirect(input: { orderId: string; supplierId: string }) {
     const { orderId, supplierId } = input;
 
-    const dbSession = await mongoose.startSession();
-    let order: any;
-    let offer: any;
-    let sessionDoc: any;
-    let supplierPendingOffers: any[] = [];
+    const result = await prisma
+      .$transaction(async (tx) => {
+        await this.ensureSupplierCanCreateOffer(supplierId, tx);
 
-    try {
-      await dbSession.withTransaction(async () => {
-        await this.ensureSupplierCanCreateOffer(supplierId, dbSession);
-
-        order = await orderModel.findById(orderId).session(dbSession || null);
-
-        if (!order) {
-          throw new AppError("Order not found", 404);
-        }
-
-        if (order.status !== ORDER_STATUS.PENDING) {
+        const order = await tx.order.findUnique({ where: { id: orderId } });
+        if (!order) throw new AppError("Order not found", 404);
+        if (order.status !== OrderStatus.pending) {
           throw new AppError("Order already taken or not available", 409);
         }
-
-        if (order.customerId.toString() === supplierId) {
+        if (order.customerId === supplierId) {
           throw new AppError("You cannot accept your own order", 400);
         }
-
         if (!order.timeToStart) {
           throw new AppError("Order is missing timeToStart", 400);
         }
 
-        const schedule = resolveOfferSchedule(order, {
-          timeToStart: order.timeToStart,
-          estimatedDuration: order.estimatedDuration,
-          expectedDays: order.expectedDays,
-        });
+        const isDailyOrder = order.orderType === ORDER_TYPE.DAILY;
+        const directTimeToStart = isDailyOrder
+          ? normalizeDailyStart(order.timeToStart)
+          : new Date(order.timeToStart);
+        const directEstimatedDuration = isDailyOrder
+          ? DAILY_DURATION_MINUTES
+          : order.estimatedDuration!;
 
-        supplierPendingOffers =
-          await OfferRepository.findPendingOffersBySupplier(
-            supplierId,
-            dbSession,
-          );
+        const supplierPendingOffers = await OfferRepository.findPendingOffersBySupplier(
+          supplierId,
+          tx,
+        );
 
-        offer = await OfferRepository.createOffer(
+        const offer = await OfferRepository.createOffer(
           {
             orderId,
             supplierId,
-            amount: order.requestedPrice,
-            timeToStart: schedule.timeToStart,
-            estimatedDuration: schedule.estimatedDuration,
-            expectedDays: schedule.expectedDays,
-            status: OFFER_STATUS.ACCEPTED,
+            amount: Number(order.requestedPrice),
+            timeToStart: directTimeToStart,
+            estimatedDuration: directEstimatedDuration,
+            expectedDays: order.expectedDays,
+            status: OfferStatus.accepted,
           },
-          dbSession,
+          tx,
         );
 
         await OfferRepository.rejectOtherPendingOffersForSupplier(
           supplierId,
-          offer._id,
-          dbSession,
+          offer.id,
+          tx,
         );
+        await OfferRepository.rejectOtherOffersForOrder(orderId, offer.id, tx);
 
-        await OfferRepository.rejectOtherOffersForOrder(
-          orderId,
-          offer._id,
-          dbSession,
-        );
-
-        const directStartTime = schedule.timeToStart;
-        const isDirectScheduled = directStartTime > new Date();
+        const isDirectScheduled = directTimeToStart > new Date();
+        let sessionDoc: any = null;
 
         if (isDirectScheduled) {
-          const duration = schedule.estimatedDuration;
-
+          const duration = directEstimatedDuration;
           const [supplierConflict, customerConflict] = await Promise.all([
             this.checkSupplierTimeConflict(
-              supplierId, directStartTime, duration, offer._id.toString(), dbSession,
+              supplierId,
+              directTimeToStart,
+              duration,
+              offer.id,
+              tx,
             ),
             this.checkCustomerTimeConflict(
-              order.customerId.toString(), directStartTime, duration, dbSession,
+              order.customerId,
+              directTimeToStart,
+              duration,
+              tx,
             ),
           ]);
 
@@ -1081,62 +1019,72 @@ export class OfferService {
           }
 
           const updatedOrder = await OrderRepository.markScheduled(
-            order._id, supplierId, order.requestedPrice,
-            directStartTime, schedule.estimatedDuration, dbSession,
+            order.id,
+            supplierId,
+            Number(order.requestedPrice),
+            directTimeToStart,
+            directEstimatedDuration,
+            tx,
           );
           if (!updatedOrder) throw new AppError("Order state changed concurrently", 409);
         } else {
           const updatedOrder = await OrderRepository.markInProgress(
-            order._id, supplierId, order.requestedPrice, dbSession,
+            order.id,
+            supplierId,
+            Number(order.requestedPrice),
+            tx,
           );
           if (!updatedOrder) throw new AppError("Order state changed concurrently", 409);
 
-          const workflowSteps = await resolveWorkflowSteps(order, dbSession);
+          const workflowSteps = await resolveWorkflowSteps(order, tx);
 
           sessionDoc = await SessionRepository.createSession(
             {
-              orderId: order._id,
-              offerId: offer._id,
+              orderId: order.id,
+              offerId: offer.id,
               customerId: order.customerId,
               supplierId,
               workflowSteps,
               status: SESSION_STATUS.STARTED,
               startedAt: new Date(),
             },
-            dbSession,
+            tx,
           );
         }
-      });
-    } catch (error: any) {
-      if (error?.code === 11000) {
-        throw new AppError(
-          "Order or supplier active job state changed. Please refresh and try again.",
-          409,
-        );
-      }
-      throw error;
-    } finally {
-      await dbSession.endSession();
-    }
 
+        return { order, offer, sessionDoc, supplierPendingOffers };
+      })
+      .catch((error: any) => {
+        if (error?.code === "P2002") {
+          throw new AppError(
+            "Order or supplier active job state changed. Please refresh and try again.",
+            409,
+          );
+        }
+        throw error;
+      });
+
+    const { order, offer, sessionDoc, supplierPendingOffers } = result;
     const isDirectScheduled = !sessionDoc;
     const io = getIO();
-    const orderPayload = await buildSupplierOrderPayload(order._id.toString());
-    const sessionPayload = sessionDoc ? {
-      _id: sessionDoc._id.toString(),
-      orderId: sessionDoc.orderId.toString(),
-      offerId: sessionDoc.offerId.toString(),
-      customerId: sessionDoc.customerId.toString(),
-      supplierId: sessionDoc.supplierId.toString(),
-      status: sessionDoc.status,
-    } : null;
+    const orderPayload = await buildSupplierOrderPayload(order.id);
+    const sessionPayload = sessionDoc
+      ? {
+          _id: sessionDoc.id,
+          orderId: sessionDoc.orderId,
+          offerId: sessionDoc.offerId,
+          customerId: sessionDoc.customerId,
+          supplierId: sessionDoc.supplierId,
+          status: sessionDoc.status,
+        }
+      : null;
 
-    [order.customerId.toString(), supplierId.toString()].forEach((uid) => {
+    [order.customerId, supplierId].forEach((uid) => {
       io.to(socketRooms.user(uid)).emit(socketEvents.ORDER_ACCEPTED_DIRECT, {
-        orderId: order._id.toString(),
-        supplierId: supplierId.toString(),
-        offerId: offer._id.toString(),
-        sessionId: sessionDoc?._id?.toString() || null,
+        orderId: order.id,
+        supplierId,
+        offerId: offer.id,
+        sessionId: sessionDoc?.id || null,
         isScheduled: isDirectScheduled,
         scheduledAt: offer.timeToStart || null,
         order: orderPayload,
@@ -1147,14 +1095,14 @@ export class OfferService {
     });
 
     if (!isDirectScheduled && sessionDoc) {
-      [order.customerId.toString(), supplierId.toString()].forEach((uid) => {
+      [order.customerId, supplierId].forEach((uid) => {
         io.to(socketRooms.user(uid)).emit(socketEvents.SESSION_CREATED, {
           session: sessionPayload,
           order: orderPayload,
           offer: {
-            _id: offer._id.toString(),
-            orderId: offer.orderId.toString(),
-            supplierId: offer.supplierId.toString(),
+            _id: offer.id,
+            orderId: offer.orderId,
+            supplierId: offer.supplierId,
             amount: offer.amount,
             status: offer.status,
           },
@@ -1166,21 +1114,42 @@ export class OfferService {
     await Promise.all([
       OfferEventService.emitSupplierPendingCountUpdate(supplierId),
       OfferEventService.emitSupplierPendingOffersList(supplierId),
+      publishNotification({
+        userId: order.customerId,
+        type: OFFER_NOTIFICATION_TYPES.ORDER_ACCEPTED_DIRECT,
+        title: "Order Accepted",
+        message: `A supplier has directly accepted your order.`,
+        data: {
+          orderId: order.id,
+          offerId: offer.id,
+          supplierId,
+          isScheduled: isDirectScheduled,
+          scheduledAt: offer.timeToStart || null,
+        },
+      }),
       isDirectScheduled
         ? Promise.all([
             publishNotification({
-              userId: order.customerId.toString(),
+              userId: order.customerId,
               type: SESSION_NOTIFICATION_TYPES.SESSION_SCHEDULED,
               title: "Job Scheduled",
               message: `Your job has been scheduled for ${offer.timeToStart?.toISOString()}.`,
-              data: { orderId: order._id.toString(), offerId: offer._id.toString(), scheduledAt: offer.timeToStart },
+              data: {
+                orderId: order.id,
+                offerId: offer.id,
+                scheduledAt: offer.timeToStart,
+              },
             }),
             publishNotification({
               userId: supplierId,
               type: SESSION_NOTIFICATION_TYPES.SESSION_SCHEDULED,
               title: "Job Scheduled",
               message: `You have a scheduled job on ${offer.timeToStart?.toISOString()}.`,
-              data: { orderId: order._id.toString(), offerId: offer._id.toString(), scheduledAt: offer.timeToStart },
+              data: {
+                orderId: order.id,
+                offerId: offer.id,
+                scheduledAt: offer.timeToStart,
+              },
             }),
           ])
         : SessionEventService.notifySessionCreated(sessionDoc),
@@ -1188,13 +1157,15 @@ export class OfferService {
 
     return {
       success: true,
-      message: isDirectScheduled ? "Order accepted and job scheduled" : "Order accepted successfully",
+      message: isDirectScheduled
+        ? "Order accepted and job scheduled"
+        : "Order accepted successfully",
       isScheduled: isDirectScheduled,
       scheduledAt: isDirectScheduled ? offer.timeToStart : null,
       offer: {
-        _id: offer._id.toString(),
-        orderId: offer.orderId.toString(),
-        supplierId: offer.supplierId.toString(),
+        _id: offer.id,
+        orderId: offer.orderId,
+        supplierId: offer.supplierId,
         amount: offer.amount,
         status: offer.status,
       },
@@ -1202,7 +1173,7 @@ export class OfferService {
       order: orderPayload,
       withdrawnOffers: {
         count: supplierPendingOffers.length,
-        orders: supplierPendingOffers.map((o) => o.orderId.toString()),
+        orders: supplierPendingOffers.map((o: any) => o.orderId),
       },
     };
   }
@@ -1215,26 +1186,17 @@ export class OfferService {
     const { supplierId, page = 1, limit = 20 } = input;
 
     const [offers, total] = await Promise.all([
-      OfferRepository.findSupplierAcceptedOffersHistory(
-        supplierId,
-        page,
-        limit,
-      ),
+      OfferRepository.findSupplierAcceptedOffersHistory(supplierId, page, limit),
       OfferRepository.countSupplierAcceptedOffersHistory(supplierId),
     ]);
 
     const enrichedOffers = await Promise.all(
-      offers.map(async (offer: any) => {
+      offers.map(async (offer) => {
         const [order, session] = await Promise.all([
-          orderModel.findById(offer.orderId),
-          sessionModel.findOne({ offerId: offer._id }),
+          prisma.order.findUnique({ where: { id: offer.orderId } }),
+          prisma.jobSession.findFirst({ where: { offerId: offer.id } }),
         ]);
-
-        return {
-          ...offer.toObject(),
-          order: order || null,
-          session: session || null,
-        };
+        return { ...offer, order: order || null, session: session || null };
       }),
     );
 
@@ -1259,23 +1221,15 @@ export class OfferService {
     const { supplierId, page = 1, limit = 20 } = input;
 
     const [offers, total, activeAcceptedOffer] = await Promise.all([
-      OfferRepository.findSupplierPendingOffersPaginated(
-        supplierId,
-        page,
-        limit,
-      ),
+      OfferRepository.findSupplierPendingOffersPaginated(supplierId, page, limit),
       OfferRepository.countPendingOffersBySupplier(supplierId),
       OfferRepository.findAcceptedOfferBySupplier(supplierId),
     ]);
 
     const enrichedOffers = await Promise.all(
-      offers.map(async (offer: any) => {
-        const order = await orderModel.findById(offer.orderId).lean();
-
-        return {
-          ...offer.toObject(),
-          order: order || null,
-        };
+      offers.map(async (offer) => {
+        const order = await prisma.order.findUnique({ where: { id: offer.orderId } });
+        return { ...offer, order: order || null };
       }),
     );
 

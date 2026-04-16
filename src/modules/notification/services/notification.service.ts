@@ -1,4 +1,4 @@
-import mongoose from "mongoose";
+import prisma from "../../../shared/config/prisma";
 import { AppError } from "../../../shared/middlewares/errorHandler";
 import { NotificationRepository } from "../repositories/notification.repository";
 import { NotificationEventService } from "./notification-event.service";
@@ -32,25 +32,12 @@ export class NotificationService {
       );
     }
 
-    const dbSession = await mongoose.startSession();
-    let notification: any;
-
-    try {
-      await dbSession.withTransaction(async () => {
-        notification = await NotificationRepository.createNotification(
-          {
-            userId,
-            type,
-            title,
-            message,
-            data: data || null,
-          },
-          dbSession,
-        );
-      });
-    } finally {
-      await dbSession.endSession();
-    }
+    const notification = await prisma.$transaction((tx) =>
+      NotificationRepository.createNotification(
+        { userId, type, title, message, data: data || null },
+        tx,
+      ),
+    );
 
     const unreadCount = await NotificationRepository.countUnreadByUserId(userId);
 
@@ -103,7 +90,7 @@ export class NotificationService {
       throw new AppError("Notification not found", 404);
     }
 
-    if (notification.userId.toString() !== userId) {
+    if (notification.userId !== userId) {
       throw new AppError("Not allowed", 403);
     }
 
@@ -148,15 +135,7 @@ export class NotificationService {
   }) {
     const { userId } = input;
 
-    const dbSession = await mongoose.startSession();
-
-    try {
-      await dbSession.withTransaction(async () => {
-        await NotificationRepository.markAllAsRead(userId, dbSession);
-      });
-    } finally {
-      await dbSession.endSession();
-    }
+    await NotificationRepository.markAllAsRead(userId);
 
     NotificationEventService.emitAllNotificationsRead(userId, 0);
 

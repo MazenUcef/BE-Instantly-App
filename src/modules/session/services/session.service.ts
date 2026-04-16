@@ -1,8 +1,11 @@
-import mongoose from "mongoose";
-import Order from "../../order/models/Order.model";
-import Offer from "../../offer/models/Offer.model";
-import UserModel from "../../auth/models/User.model";
-import CategoryModel from "../../category/models/Category.model";
+import prisma from "../../../shared/config/prisma";
+import {
+  Prisma,
+  OrderStatus,
+  OfferStatus,
+  SessionStatus,
+  BundleBookingStatus,
+} from "@prisma/client";
 import { AppError } from "../../../shared/middlewares/errorHandler";
 import { SessionRepository } from "../repositories/session.repository";
 import { SessionEventService } from "./session-event.service";
@@ -15,35 +18,55 @@ import {
   SESSION_CANCELLED_BY,
   SESSION_RESUME_ACTION,
 } from "../../../shared/constants/session.constants";
-import { ORDER_STATUS, ORDER_CANCELLED_BY } from "../../../shared/constants/order.constants";
-import { OFFER_STATUS } from "../../../shared/constants/offer.constants";
-import { assertValidSessionTransition, canCancelSession, canCompleteSession, canConfirmSessionPayment, isSessionTerminal } from "../helper/session-state";
-import BundleBookingModel from "../../bundleBooking/models/bundleBooking.model";
-import BundleModel from "../../bundle/models/bundle.model";
+import {
+  ORDER_STATUS,
+  ORDER_CANCELLED_BY,
+} from "../../../shared/constants/order.constants";
+import {
+  assertValidSessionTransition,
+  canCancelSession,
+  canCompleteSession,
+  canConfirmSessionPayment,
+  isSessionTerminal,
+} from "../helper/session-state";
+
+type Tx = Prisma.TransactionClient;
+
+const userSelect = {
+  id: true,
+  firstName: true,
+  lastName: true,
+  email: true,
+  phoneNumber: true,
+  profilePicture: true,
+  address: true,
+  averageRating: true,
+  totalReviews: true,
+  role: true,
+} as const;
 
 const populateSessionData = async (session: any) => {
   if (!session) return null;
 
-  const sessionObj = session.toObject ? session.toObject() : session;
-
   const [customer, supplier] = await Promise.all([
-    UserModel.findById(session.customerId)
-      .select("-password -refreshToken -biometrics")
-      .lean(),
-    UserModel.findById(session.supplierId)
-      .select("-password -refreshToken -biometrics")
-      .lean(),
+    prisma.user.findUnique({ where: { id: session.customerId }, select: userSelect }),
+    prisma.user.findUnique({ where: { id: session.supplierId }, select: userSelect }),
   ]);
 
   if (session.bundleBookingId) {
-    const bundleBooking = await BundleBookingModel.findById(session.bundleBookingId)
-      .populate("categoryId", "name icon")
-      .populate("governmentId", "name nameAr")
-      .lean();
-    const bundle = bundleBooking ? await BundleModel.findById(bundleBooking.bundleId).lean() : null;
+    const bundleBooking = await prisma.bundleBooking.findUnique({
+      where: { id: session.bundleBookingId },
+      include: {
+        category: { select: { id: true, name: true } },
+        government: { select: { id: true, name: true, nameAr: true } },
+      },
+    });
+    const bundle = bundleBooking
+      ? await prisma.bundle.findUnique({ where: { id: bundleBooking.bundleId } })
+      : null;
 
     return {
-      ...sessionObj,
+      ...session,
       bundleBooking: bundleBooking || null,
       bundle: bundle || null,
       order: null,
@@ -55,16 +78,19 @@ const populateSessionData = async (session: any) => {
 
   const [order, offer] = await Promise.all([
     session.orderId
-      ? Order.findById(session.orderId)
-          .populate("categoryId", "name icon")
-          .populate("governmentId", "name nameAr")
-          .lean()
+      ? prisma.order.findUnique({
+          where: { id: session.orderId },
+          include: {
+            category: { select: { id: true, name: true } },
+            government: { select: { id: true, name: true, nameAr: true } },
+          },
+        })
       : null,
-    session.offerId ? Offer.findById(session.offerId).lean() : null,
+    session.offerId ? prisma.offer.findUnique({ where: { id: session.offerId } }) : null,
   ]);
 
   return {
-    ...sessionObj,
+    ...session,
     order: order || null,
     offer: offer || null,
     bundleBooking: null,
@@ -77,16 +103,12 @@ const populateSessionData = async (session: any) => {
 export class SessionService {
   private static ensureParticipant(session: any, userId: string) {
     const isParticipant =
-      session.customerId.toString() === userId ||
-      session.supplierId.toString() === userId;
-
-    if (!isParticipant) {
-      throw new AppError("Not allowed", 403);
-    }
+      session.customerId === userId || session.supplierId === userId;
+    if (!isParticipant) throw new AppError("Not allowed", 403);
   }
 
   private static ensureSupplier(session: any, userId: string) {
-    if (session.supplierId.toString() !== userId) {
+    if (session.supplierId !== userId) {
       throw new AppError("Only supplier can do this action", 403);
     }
   }
@@ -98,72 +120,42 @@ export class SessionService {
       customerId: string;
       supplierId: string;
     },
-    dbSession: any,
+    tx: Tx,
   ) {
     const [order, offer] = await Promise.all([
-      Order.findById(input.orderId).session(dbSession),
-      Offer.findById(input.offerId).session(dbSession),
+      tx.order.findUnique({ where: { id: input.orderId } }),
+      tx.offer.findUnique({ where: { id: input.offerId } }),
     ]);
 
-    if (!order) {
-      throw new AppError("Order not found", 404);
-    }
-
-    if (!offer) {
-      throw new AppError("Offer not found", 404);
-    }
-
-    if (String(order._id) !== String(offer.orderId)) {
+    if (!order) throw new AppError("Order not found", 404);
+    if (!offer) throw new AppError("Offer not found", 404);
+    if (order.id !== offer.orderId)
       throw new AppError("Offer does not belong to this order", 400);
-    }
-
-    if (String(order.customerId) !== String(input.customerId)) {
+    if (order.customerId !== input.customerId)
       throw new AppError("Customer mismatch for order", 400);
-    }
-
-    if (String(offer.supplierId) !== String(input.supplierId)) {
+    if (offer.supplierId !== input.supplierId)
       throw new AppError("Supplier mismatch for offer", 400);
-    }
-
-    if (order.status !== ORDER_STATUS.IN_PROGRESS) {
+    if (order.status !== OrderStatus.in_progress)
       throw new AppError("Order must be in progress before creating session", 409);
-    }
-
-    if (offer.status !== OFFER_STATUS.ACCEPTED) {
+    if (offer.status !== OfferStatus.accepted)
       throw new AppError("Offer must be accepted before creating session", 409);
-    }
 
-    const existingOrderSession = await SessionRepository.findByOrderId(
-      input.orderId,
-      dbSession,
-    );
-
-    if (existingOrderSession) {
+    const existingOrderSession = await SessionRepository.findByOrderId(input.orderId, tx);
+    if (existingOrderSession)
       throw new AppError("Session already exists for this order", 409);
-    }
 
-    const existingOfferSession = await SessionRepository.findByOfferId(
-      input.offerId,
-      dbSession,
-    );
-
-    if (existingOfferSession) {
+    const existingOfferSession = await SessionRepository.findByOfferId(input.offerId, tx);
+    if (existingOfferSession)
       throw new AppError("Session already exists for this offer", 409);
-    }
 
-    const category = await CategoryModel.findById(order.categoryId).session(dbSession);
+    const category = await tx.category.findUnique({
+      where: { id: order.categoryId },
+      include: { workflows: true },
+    });
+    if (!category) throw new AppError("Category not found", 404);
 
-    if (!category) {
-      throw new AppError("Category not found", 404);
-    }
-
-    const workflow = category.workflows?.find(
-      (w) => w.key === (order as any).selectedWorkflow,
-    );
-
-    if (!workflow) {
-      throw new AppError("Workflow not found for this order's category", 400);
-    }
+    const workflow = category.workflows.find((w) => w.key === order.selectedWorkflow);
+    if (!workflow) throw new AppError("Workflow not found for this order's category", 400);
 
     return { order, offer, workflowSteps: workflow.steps };
   }
@@ -176,41 +168,30 @@ export class SessionService {
   }) {
     const { orderId, offerId, customerId, supplierId } = input;
 
-    const dbSession = await mongoose.startSession();
-    let createdSession: any;
-
-    try {
-      await dbSession.withTransaction(async () => {
+    const createdSession = await prisma
+      .$transaction(async (tx) => {
         const { workflowSteps } = await this.validateSessionCreationInput(
           { orderId, offerId, customerId, supplierId },
-          dbSession,
+          tx,
         );
 
         const existingCustomerSession = await SessionRepository.findActiveByUser(
           customerId,
-          dbSession,
+          tx,
         );
-
-        if (
-          existingCustomerSession &&
-          existingCustomerSession.customerId.toString() === customerId
-        ) {
+        if (existingCustomerSession && existingCustomerSession.customerId === customerId) {
           throw new AppError("Customer already has an active session", 400);
         }
 
         const existingSupplierSession = await SessionRepository.findActiveByUser(
           supplierId,
-          dbSession,
+          tx,
         );
-
-        if (
-          existingSupplierSession &&
-          existingSupplierSession.supplierId.toString() === supplierId
-        ) {
+        if (existingSupplierSession && existingSupplierSession.supplierId === supplierId) {
           throw new AppError("Supplier already has an active session", 400);
         }
 
-        createdSession = await SessionRepository.createSession(
+        return SessionRepository.createSession(
           {
             orderId,
             offerId,
@@ -220,17 +201,18 @@ export class SessionService {
             status: SESSION_STATUS.STARTED,
             startedAt: new Date(),
           },
-          dbSession,
+          tx,
         );
+      })
+      .catch((error: any) => {
+        if (error?.code === "P2002") {
+          throw new AppError(
+            "Session already exists or active session conflict occurred",
+            409,
+          );
+        }
+        throw error;
       });
-    } catch (error: any) {
-      if (error?.code === 11000) {
-        throw new AppError("Session already exists or active session conflict occurred", 409);
-      }
-      throw error;
-    } finally {
-      await dbSession.endSession();
-    }
 
     const populatedSession = await populateSessionData(createdSession);
     await SessionEventService.notifySessionCreated(populatedSession);
@@ -242,50 +224,22 @@ export class SessionService {
     };
   }
 
-  static async getSessionById(input: {
-    sessionId: string;
-    userId: string;
-  }) {
+  static async getSessionById(input: { sessionId: string; userId: string }) {
     const session = await SessionRepository.findById(input.sessionId);
-
-    if (!session) {
-      throw new AppError("Session not found", 404);
-    }
+    if (!session) throw new AppError("Session not found", 404);
 
     this.ensureParticipant(session, input.userId);
 
     const populatedSession = await populateSessionData(session);
-
-    return {
-      success: true,
-      data: { session: populatedSession },
-    };
+    return { success: true, data: { session: populatedSession } };
   }
 
-  static async getActiveSessionForUser(input: {
-    requestedUserId: string;
-    actorUserId: string;
-  }) {
-    if (input.requestedUserId !== input.actorUserId) {
-      throw new AppError("Not allowed", 403);
-    }
-
-    const session = await SessionRepository.findActiveByUser(input.actorUserId);
-
-    if (!session) {
-      return {
-        success: true,
-        active: false,
-      };
-    }
+  static async getActiveSessionForUser(userId: string) {
+    const session = await SessionRepository.findActiveByUser(userId);
+    if (!session) return { success: true, active: false };
 
     const populatedSession = await populateSessionData(session);
-
-    return {
-      success: true,
-      active: true,
-      data: { session: populatedSession },
-    };
+    return { success: true, active: true, data: { session: populatedSession } };
   }
 
   static async updateSessionStatus(input: {
@@ -296,133 +250,101 @@ export class SessionService {
   }) {
     const { sessionId, actorUserId, nextStatus, reason } = input;
 
-    const dbSession = await mongoose.startSession();
-    let updatedSession: any;
-    let cancelledBy: "customer" | "supplier" | null = null;
-    let relatedOrder: any = null;
+    const result = await prisma.$transaction(async (tx) => {
+      const session = await SessionRepository.findById(sessionId, tx);
+      if (!session) throw new AppError("Session not found", 404);
 
-    try {
-      await dbSession.withTransaction(async () => {
-        const session = await SessionRepository.findById(sessionId, dbSession);
+      this.ensureParticipant(session, actorUserId);
 
-        if (!session) {
-          throw new AppError("Session not found", 404);
+      if (nextStatus === SESSION_STATUS.COMPLETED) {
+        throw new AppError("Use the complete endpoint to finish a session", 400);
+      }
+
+      if (nextStatus === SESSION_STATUS.CANCELLED) {
+        if (!canCancelSession(session.status)) {
+          throw new AppError("Session cannot be cancelled now", 400);
         }
 
-        this.ensureParticipant(session, actorUserId);
+        const isCustomer = session.customerId === actorUserId;
+        const cancelledBy = isCustomer
+          ? SESSION_CANCELLED_BY.CUSTOMER
+          : SESSION_CANCELLED_BY.SUPPLIER;
 
-        if (nextStatus === SESSION_STATUS.COMPLETED) {
-          throw new AppError(
-            "Use the complete endpoint to finish a session",
-            400,
-          );
-        }
-
-        if (nextStatus === SESSION_STATUS.CANCELLED) {
-          if (!canCancelSession(session.status as string)) {
-            throw new AppError("Session cannot be cancelled now", 400);
-          }
-
-          const isCustomer = session.customerId.toString() === actorUserId;
-          cancelledBy = isCustomer
-            ? SESSION_CANCELLED_BY.CUSTOMER
-            : SESSION_CANCELLED_BY.SUPPLIER;
-
-          updatedSession = await SessionRepository.markCancelled(
-            sessionId,
-            session.status,
-            cancelledBy,
-            reason,
-            dbSession,
-          );
-
-          if (!updatedSession) {
-            throw new AppError("Failed to cancel session", 409);
-          }
-
-          if (session.orderId && session.offerId) {
-            // Order-based session cancellation
-            relatedOrder = await Order.findById(session.orderId).session(dbSession);
-
-            if (!relatedOrder) {
-              throw new AppError("Associated order not found", 404);
-            }
-
-            await Offer.findByIdAndUpdate(
-              session.offerId,
-              {
-                $set: isCustomer
-                  ? { status: OFFER_STATUS.REJECTED, rejectedAt: new Date() }
-                  : { status: OFFER_STATUS.WITHDRAWN, withdrawnAt: new Date() },
-              },
-              { session: dbSession, new: true },
-            );
-
-            if (isCustomer) {
-              await Offer.updateMany(
-                {
-                  orderId: relatedOrder._id,
-                  status: OFFER_STATUS.PENDING,
-                },
-                {
-                  $set: {
-                    status: OFFER_STATUS.REJECTED,
-                    rejectedAt: new Date(),
-                  },
-                },
-                { session: dbSession },
-              );
-
-              await OrderRepository.markCancelled(
-                {
-                  orderId: relatedOrder._id,
-                  cancelledBy: ORDER_CANCELLED_BY.CUSTOMER,
-                  cancellationReason: reason || "customer_cancelled_session",
-                },
-                dbSession,
-              );
-            } else {
-              await OrderRepository.resetToPending(relatedOrder._id, dbSession);
-            }
-          } else if (session.bundleBookingId) {
-            // Bundle booking session cancellation
-            await BundleBookingModel.findByIdAndUpdate(
-              session.bundleBookingId,
-              {
-                $set: {
-                  status: "cancelled",
-                  cancelledBy: isCustomer ? "customer" : "supplier",
-                },
-              },
-              { session: dbSession },
-            );
-          }
-
-          return;
-        }
-
-        this.ensureSupplier(session, actorUserId);
-        assertValidSessionTransition(session.workflowSteps, session.status, nextStatus);
-
-        const extraSet = { [`stepTimestamps.${nextStatus}`]: new Date() };
-
-        updatedSession = await SessionRepository.updateStatus(
+        const updated = await SessionRepository.markCancelled(
           sessionId,
           session.status,
-          nextStatus,
-          extraSet,
-          dbSession,
+          cancelledBy,
+          reason,
+          tx,
         );
+        if (!updated) throw new AppError("Failed to cancel session", 409);
 
-        if (!updatedSession) {
-          throw new AppError("Failed to update session status", 409);
+        let relatedOrder: any = null;
+
+        if (session.orderId && session.offerId) {
+          relatedOrder = await tx.order.findUnique({ where: { id: session.orderId } });
+          if (!relatedOrder) throw new AppError("Associated order not found", 404);
+
+          await tx.offer.update({
+            where: { id: session.offerId },
+            data: isCustomer
+              ? { status: OfferStatus.rejected, rejectedAt: new Date() }
+              : { status: OfferStatus.withdrawn, withdrawnAt: new Date() },
+          });
+
+          if (isCustomer) {
+            await tx.offer.updateMany({
+              where: { orderId: relatedOrder.id, status: OfferStatus.pending },
+              data: { status: OfferStatus.rejected, rejectedAt: new Date() },
+            });
+            await OrderRepository.markCancelled(
+              {
+                orderId: relatedOrder.id,
+                cancelledBy: ORDER_CANCELLED_BY.CUSTOMER,
+                cancellationReason: reason || "customer_cancelled_session",
+              },
+              tx,
+            );
+          } else {
+            await OrderRepository.resetToPending(relatedOrder.id, tx);
+          }
+        } else if (session.bundleBookingId) {
+          await tx.bundleBooking.update({
+            where: { id: session.bundleBookingId },
+            data: {
+              status: BundleBookingStatus.cancelled,
+              cancelledBy: isCustomer ? "customer" : "supplier",
+            },
+          });
         }
-      });
-    } finally {
-      await dbSession.endSession();
-    }
 
-    const populatedSession = await populateSessionData(updatedSession);
+        return { updated, cancelledBy, relatedOrder };
+      }
+
+      this.ensureSupplier(session, actorUserId);
+      const currentStep = session.currentStep || SESSION_STATUS.STARTED;
+      assertValidSessionTransition(session.workflowSteps, currentStep, nextStatus);
+
+      const currentTimestamps = (session.stepTimestamps as Record<string, any>) || {};
+      const nextTimestamps = {
+        ...currentTimestamps,
+        [nextStatus]: new Date().toISOString(),
+      };
+
+      const updated = await SessionRepository.updateStatus(
+        sessionId,
+        session.status,
+        nextStatus,
+        { stepTimestamps: nextTimestamps },
+        tx,
+      );
+      if (!updated) throw new AppError("Failed to update session status", 409);
+
+      return { updated, cancelledBy: null, relatedOrder: null };
+    });
+
+    const { updated, cancelledBy, relatedOrder } = result;
+    const populatedSession = await populateSessionData(updated);
 
     if (nextStatus !== SESSION_STATUS.CANCELLED) {
       SessionEventService.emitSessionToParticipants(
@@ -431,10 +353,7 @@ export class SessionService {
         { status: nextStatus },
       );
 
-      await SessionEventService.notifySessionStatusUpdated(
-        populatedSession,
-        nextStatus,
-      );
+      await SessionEventService.notifySessionStatusUpdated(populatedSession, nextStatus);
 
       return {
         success: true,
@@ -443,12 +362,11 @@ export class SessionService {
       };
     }
 
-    // Emit cancellation events using standard envelopes
     if (cancelledBy === SESSION_CANCELLED_BY.CUSTOMER && relatedOrder) {
       await OrderEventService.emitOrderCancelled(
-        relatedOrder._id.toString(),
-        relatedOrder.categoryId.toString(),
-        relatedOrder.governmentId.toString(),
+        relatedOrder.id,
+        relatedOrder.categoryId,
+        relatedOrder.governmentId,
         {
           actorId: actorUserId,
           actorRole: "customer",
@@ -459,9 +377,9 @@ export class SessionService {
 
     if (cancelledBy === SESSION_CANCELLED_BY.SUPPLIER && relatedOrder) {
       await OrderEventService.emitOrderAvailableAgain(
-        relatedOrder._id.toString(),
-        relatedOrder.categoryId.toString(),
-        relatedOrder.governmentId.toString(),
+        relatedOrder.id,
+        relatedOrder.categoryId,
+        relatedOrder.governmentId,
         reason || "supplier_cancelled_session",
       );
     }
@@ -474,7 +392,7 @@ export class SessionService {
 
     await SessionEventService.notifySessionCancelled(
       populatedSession,
-      cancelledBy!,
+      cancelledBy as "customer" | "supplier",
     );
 
     return {
@@ -494,78 +412,52 @@ export class SessionService {
     };
   }
 
-  static async completeSession(input: {
-    sessionId: string;
-    actorUserId: string;
-  }) {
+  static async completeSession(input: { sessionId: string; actorUserId: string }) {
     const { sessionId, actorUserId } = input;
 
-    const dbSession = await mongoose.startSession();
-    let completedSession: any;
+    const completedSession = await prisma.$transaction(async (tx) => {
+      const session = await SessionRepository.findById(sessionId, tx);
+      if (!session) throw new AppError("Session not found", 404);
 
-    try {
-      await dbSession.withTransaction(async () => {
-        const session = await SessionRepository.findById(sessionId, dbSession);
+      this.ensureSupplier(session, actorUserId);
 
-        if (!session) {
-          throw new AppError("Session not found", 404);
-        }
+      if (isSessionTerminal(session.status)) {
+        throw new AppError(`Session is already ${session.status}`, 400);
+      }
+      if (!canCompleteSession(session)) {
+        throw new AppError("Session cannot be completed from its current step", 400);
+      }
 
-        this.ensureSupplier(session, actorUserId);
+      const lastWorkflowStep =
+        session.workflowSteps[session.workflowSteps.length - 1] ?? SESSION_STATUS.STARTED;
 
-        if (isSessionTerminal(session.status)) {
-          throw new AppError(
-            `Session is already ${session.status}`,
-            400,
-          );
-        }
+      const completed = await SessionRepository.markCompleted(
+        sessionId,
+        lastWorkflowStep,
+        tx,
+      );
+      if (!completed) throw new AppError("Failed to complete session", 409);
 
-        if (!canCompleteSession(session)) {
-          throw new AppError(
-            "Session cannot be completed from its current step",
-            400,
-          );
-        }
+      if (session.orderId && session.offerId) {
+        const [completedOrder, completedOffer] = await Promise.all([
+          OrderRepository.markCompleted(session.orderId, tx),
+          OfferRepository.markCompleted(session.offerId, tx),
+        ]);
+        if (!completedOrder) throw new AppError("Failed to complete order", 409);
+        if (!completedOffer) throw new AppError("Failed to complete offer", 409);
+      } else if (session.bundleBookingId) {
+        await tx.bundleBooking.update({
+          where: { id: session.bundleBookingId },
+          data: {
+            status: BundleBookingStatus.completed,
+            paymentConfirmed: true,
+            paymentConfirmedAt: new Date(),
+          },
+        });
+      }
 
-        const lastWorkflowStep =
-          session.workflowSteps[session.workflowSteps.length - 1] ??
-          SESSION_STATUS.STARTED;
-
-        completedSession = await SessionRepository.markCompleted(
-          sessionId,
-          lastWorkflowStep,
-          dbSession,
-        );
-
-        if (!completedSession) {
-          throw new AppError("Failed to complete session", 409);
-        }
-
-        if (session.orderId && session.offerId) {
-          const [completedOrder, completedOffer] = await Promise.all([
-            OrderRepository.markCompleted(session.orderId, dbSession),
-            OfferRepository.markCompleted(session.offerId, dbSession),
-          ]);
-
-          if (!completedOrder) {
-            throw new AppError("Failed to complete order", 409);
-          }
-
-          if (!completedOffer) {
-            throw new AppError("Failed to complete offer", 409);
-          }
-        } else if (session.bundleBookingId) {
-          const BundleBookingModel = (await import("../../bundleBooking/models/bundleBooking.model")).default;
-          await BundleBookingModel.findByIdAndUpdate(
-            session.bundleBookingId,
-            { $set: { status: "completed", paymentConfirmed: true, paymentConfirmedAt: new Date() } },
-            { session: dbSession },
-          );
-        }
-      });
-    } finally {
-      await dbSession.endSession();
-    }
+      return completed;
+    });
 
     const populatedSession = await populateSessionData(completedSession);
 
@@ -583,24 +475,14 @@ export class SessionService {
     };
   }
 
-  static async getSessionByOrder(input: {
-    orderId: string;
-    userId: string;
-  }) {
+  static async getSessionByOrder(input: { orderId: string; userId: string }) {
     const session = await SessionRepository.findByOrderId(input.orderId);
-
-    if (!session) {
-      throw new AppError("Session not found", 404);
-    }
+    if (!session) throw new AppError("Session not found", 404);
 
     this.ensureParticipant(session, input.userId);
 
     const populatedSession = await populateSessionData(session);
-
-    return {
-      success: true,
-      data: { session: populatedSession },
-    };
+    return { success: true, data: { session: populatedSession } };
   }
 
   static async getSessionByBundleBooking(input: {
@@ -608,19 +490,12 @@ export class SessionService {
     userId: string;
   }) {
     const session = await SessionRepository.findByBundleBookingId(input.bundleBookingId);
-
-    if (!session) {
-      throw new AppError("Session not found for this booking", 404);
-    }
+    if (!session) throw new AppError("Session not found for this booking", 404);
 
     this.ensureParticipant(session, input.userId);
 
     const populatedSession = await populateSessionData(session);
-
-    return {
-      success: true,
-      data: { session: populatedSession },
-    };
+    return { success: true, data: { session: populatedSession } };
   }
 
   static async confirmSessionPayment(input: {
@@ -634,43 +509,21 @@ export class SessionService {
       throw new AppError("Only supplier can confirm payment", 403);
     }
 
-    const dbSession = await mongoose.startSession();
-    let updatedSession: any;
+    const updatedSession = await prisma.$transaction(async (tx) => {
+      const session = await SessionRepository.findById(sessionId, tx);
+      if (!session) throw new AppError("Session not found", 404);
 
-    try {
-      await dbSession.withTransaction(async () => {
-        const session = await SessionRepository.findById(sessionId, dbSession);
+      if (session.supplierId !== userId) {
+        throw new AppError("Not allowed to confirm payment for this session", 403);
+      }
+      if (!canConfirmSessionPayment(session.status)) {
+        throw new AppError("Payment can only be confirmed after session completion", 400);
+      }
 
-        if (!session) {
-          throw new AppError("Session not found", 404);
-        }
-
-        if (session.supplierId.toString() !== userId) {
-          throw new AppError(
-            "Not allowed to confirm payment for this session",
-            403,
-          );
-        }
-
-        if (!canConfirmSessionPayment(session.status)) {
-          throw new AppError(
-            "Payment can only be confirmed after session completion",
-            400,
-          );
-        }
-
-        updatedSession = await SessionRepository.confirmPayment(
-          sessionId,
-          dbSession,
-        );
-
-        if (!updatedSession) {
-          throw new AppError("Payment already confirmed", 409);
-        }
-      });
-    } finally {
-      await dbSession.endSession();
-    }
+      const updated = await SessionRepository.confirmPayment(sessionId, tx);
+      if (!updated) throw new AppError("Payment already confirmed", 409);
+      return updated;
+    });
 
     const populatedSession = await populateSessionData(updatedSession);
 
@@ -697,7 +550,6 @@ export class SessionService {
     }
 
     const session = await SessionRepository.findLatestByUser(input.actorUserId);
-
     if (!session) {
       return {
         success: true,
@@ -709,13 +561,12 @@ export class SessionService {
 
     const populatedSession = await populateSessionData(session);
 
-    const isCustomer = String(session.customerId) === String(input.actorUserId);
-    const isSupplier = String(session.supplierId) === String(input.actorUserId);
+    const isCustomer = session.customerId === input.actorUserId;
+    const isSupplier = session.supplierId === input.actorUserId;
 
     if (
-      ![SESSION_STATUS.COMPLETED, SESSION_STATUS.CANCELLED].includes(
-        session.status as any,
-      )
+      session.status !== SessionStatus.completed &&
+      session.status !== SessionStatus.cancelled
     ) {
       return {
         success: true,
@@ -725,9 +576,9 @@ export class SessionService {
       };
     }
 
-    if (session.status === SESSION_STATUS.COMPLETED) {
-      // Determine review status from either order or bundleBooking
-      const reviewSource = populatedSession?.order || populatedSession?.bundleBooking;
+    if (session.status === SessionStatus.completed) {
+      const reviewSource: any =
+        (populatedSession as any)?.order || (populatedSession as any)?.bundleBooking;
 
       if (isCustomer && !reviewSource?.customerReviewed) {
         return {

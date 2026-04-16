@@ -24,11 +24,11 @@ const handleValidationErrors = (
 export const validateCreateBundleBooking: RequestHandler[] = [
   body("bundleId")
     .notEmpty()
-    .isMongoId()
+    .isUUID()
     .withMessage("Valid bundleId is required"),
   body("governmentId")
     .notEmpty()
-    .isMongoId()
+    .isUUID()
     .withMessage("Valid governmentId is required"),
   body("address").notEmpty().isString().trim().isLength({ min: 3, max: 500 }),
   body("notes")
@@ -56,12 +56,12 @@ export const validateCreateBundleBooking: RequestHandler[] = [
 ];
 
 export const validateBookingIdParam: RequestHandler[] = [
-  param("id").isMongoId().withMessage("Invalid booking id"),
+  param("id").isUUID().withMessage("Invalid booking id"),
   handleValidationErrors,
 ];
 
 export const validateRejectBooking: RequestHandler[] = [
-  param("id").isMongoId().withMessage("Invalid booking id"),
+  param("id").isUUID().withMessage("Invalid booking id"),
   body("rejectionReason")
     .optional({ nullable: true })
     .isString()
@@ -71,7 +71,7 @@ export const validateRejectBooking: RequestHandler[] = [
 ];
 
 export const validateProposeTime: RequestHandler[] = [
-  param("id").isMongoId().withMessage("Invalid booking id"),
+  param("id").isUUID().withMessage("Invalid booking id"),
   body("proposedBookedDate")
     .notEmpty()
     .isISO8601()

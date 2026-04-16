@@ -1,150 +1,134 @@
-import { ClientSession, Types } from "mongoose";
-import SessionModel from "../models/session.model";
-import { SESSION_STATUS } from "../../../shared/constants/session.constants";
+import { Prisma, SessionStatus, SessionCancelledBy } from "@prisma/client";
+import prisma from "../../../shared/config/prisma";
+
+type Tx = Prisma.TransactionClient;
+
+const NON_TERMINAL: SessionStatus[] = [SessionStatus.started];
 
 export class SessionRepository {
   static createSession(
     data: {
-      orderId?: Types.ObjectId | string | null;
-      offerId?: Types.ObjectId | string | null;
-      bundleBookingId?: Types.ObjectId | string | null;
-      customerId: Types.ObjectId | string;
-      supplierId: Types.ObjectId | string;
+      orderId?: string | null;
+      offerId?: string | null;
+      bundleBookingId?: string | null;
+      customerId: string;
+      supplierId: string;
       workflowSteps: string[];
       status?: string;
       startedAt?: Date;
     },
-    session?: ClientSession,
+    tx?: Tx,
   ) {
-    return SessionModel.create([data], { session }).then((docs) => docs[0]);
-  }
-
-  static findById(sessionId: Types.ObjectId | string, session?: ClientSession) {
-    return SessionModel.findById(sessionId).session(session || null);
-  }
-
-  static findByOrderId(
-    orderId: Types.ObjectId | string,
-    session?: ClientSession,
-  ) {
-    return SessionModel.findOne({ orderId }).session(session || null);
-  }
-
-  static findByOfferId(
-    offerId: Types.ObjectId | string,
-    session?: ClientSession,
-  ) {
-    return SessionModel.findOne({ offerId }).session(session || null);
-  }
-
-  static findByBundleBookingId(
-    bundleBookingId: Types.ObjectId | string,
-    session?: ClientSession,
-  ) {
-    return SessionModel.findOne({ bundleBookingId }).session(session || null);
-  }
-
-  static findActiveByUser(
-    userId: Types.ObjectId | string,
-    session?: ClientSession,
-  ) {
-    return SessionModel.findOne({
-      $or: [{ customerId: userId }, { supplierId: userId }],
-      status: {
-        $nin: [SESSION_STATUS.COMPLETED, SESSION_STATUS.CANCELLED],
+    return (tx ?? prisma).jobSession.create({
+      data: {
+        orderId: data.orderId ?? null,
+        offerId: data.offerId ?? null,
+        bundleBookingId: data.bundleBookingId ?? null,
+        customerId: data.customerId,
+        supplierId: data.supplierId,
+        workflowSteps: data.workflowSteps,
+        status: (data.status as SessionStatus) ?? SessionStatus.started,
+        startedAt: data.startedAt ?? new Date(),
       },
-    }).session(session || null);
+    });
   }
 
-  static findLatestByUser(userId: Types.ObjectId | string) {
-    return SessionModel.findOne({
-      $or: [{ customerId: userId }, { supplierId: userId }],
-    }).sort({ updatedAt: -1 });
+  static findById(sessionId: string, tx?: Tx) {
+    return (tx ?? prisma).jobSession.findUnique({ where: { id: sessionId } });
   }
 
-  static updateStatus(
-    sessionId: Types.ObjectId | string,
+  static findByOrderId(orderId: string, tx?: Tx) {
+    return (tx ?? prisma).jobSession.findFirst({ where: { orderId } });
+  }
+
+  static findByOfferId(offerId: string, tx?: Tx) {
+    return (tx ?? prisma).jobSession.findFirst({ where: { offerId } });
+  }
+
+  static findByBundleBookingId(bundleBookingId: string, tx?: Tx) {
+    return (tx ?? prisma).jobSession.findFirst({ where: { bundleBookingId } });
+  }
+
+  static findActiveByUser(userId: string, tx?: Tx) {
+    return (tx ?? prisma).jobSession.findFirst({
+      where: {
+        OR: [{ customerId: userId }, { supplierId: userId }],
+        status: { notIn: [SessionStatus.completed, SessionStatus.cancelled] },
+      },
+    });
+  }
+
+  static findLatestByUser(userId: string) {
+    return prisma.jobSession.findFirst({
+      where: {
+        OR: [{ customerId: userId }, { supplierId: userId }],
+      },
+      orderBy: { updatedAt: "desc" },
+    });
+  }
+
+  // `currentStatus` here historically held the current workflow step name or a
+  // session lifecycle status — in Postgres we split those: workflow steps live
+  // in stepTimestamps (Json), and session status is the enum. Callers that pass
+  // a workflow step name should use updateWorkflowStep instead.
+  static async updateStatus(
+    sessionId: string,
     currentStatus: string,
     nextStatus: string,
     extraSet: Record<string, any> = {},
-    session?: ClientSession,
+    tx?: Tx,
   ) {
-    return SessionModel.findOneAndUpdate(
-      {
-        _id: sessionId,
-        status: currentStatus,
-      },
-      {
-        $set: {
-          status: nextStatus,
-          ...extraSet,
-        },
-      },
-      { new: true, session },
-    );
+    const client = tx ?? prisma;
+    const res = await client.jobSession.updateMany({
+      where: { id: sessionId, status: SessionStatus.started },
+      data: { currentStep: nextStatus, ...extraSet },
+    });
+    if (res.count === 0) return null;
+    return client.jobSession.findUnique({ where: { id: sessionId } });
   }
 
-  static markCompleted(
-    sessionId: Types.ObjectId | string,
-    lastWorkflowStep: string,
-    session?: ClientSession,
-  ) {
-    return SessionModel.findOneAndUpdate(
-      {
-        _id: sessionId,
-        status: lastWorkflowStep,
-      },
-      {
-        $set: {
-          status: SESSION_STATUS.COMPLETED,
-          completedAt: new Date(),
-        },
-      },
-      { new: true, session },
-    );
+  static async markCompleted(sessionId: string, _lastWorkflowStep: string, tx?: Tx) {
+    const client = tx ?? prisma;
+    const res = await client.jobSession.updateMany({
+      where: { id: sessionId, status: { in: NON_TERMINAL } },
+      data: { status: SessionStatus.completed, completedAt: new Date() },
+    });
+    if (res.count === 0) return null;
+    return client.jobSession.findUnique({ where: { id: sessionId } });
   }
 
-  static markCancelled(
-    sessionId: Types.ObjectId | string,
-    currentStatus: string,
+  static async markCancelled(
+    sessionId: string,
+    _currentStatus: string,
     cancelledBy: "customer" | "supplier",
     cancellationReason?: string,
-    session?: ClientSession,
+    tx?: Tx,
   ) {
-    return SessionModel.findOneAndUpdate(
-      {
-        _id: sessionId,
-        status: currentStatus,
+    const client = tx ?? prisma;
+    const res = await client.jobSession.updateMany({
+      where: { id: sessionId, status: { in: NON_TERMINAL } },
+      data: {
+        status: SessionStatus.cancelled,
+        cancelledBy: cancelledBy as SessionCancelledBy,
+        cancellationReason: cancellationReason ?? null,
+        cancelledAt: new Date(),
       },
-      {
-        $set: {
-          status: SESSION_STATUS.CANCELLED,
-          cancelledBy,
-          cancellationReason: cancellationReason || null,
-          cancelledAt: new Date(),
-        },
-      },
-      { new: true, session },
-    );
+    });
+    if (res.count === 0) return null;
+    return client.jobSession.findUnique({ where: { id: sessionId } });
   }
 
-  static confirmPayment(
-    sessionId: Types.ObjectId | string,
-    session?: ClientSession,
-  ) {
-    return SessionModel.findOneAndUpdate(
-      {
-        _id: sessionId,
-        status: SESSION_STATUS.COMPLETED,
+  static async confirmPayment(sessionId: string, tx?: Tx) {
+    const client = tx ?? prisma;
+    const res = await client.jobSession.updateMany({
+      where: {
+        id: sessionId,
+        status: SessionStatus.completed,
         paymentConfirmed: false,
       },
-      {
-        $set: {
-          paymentConfirmed: true,
-          paymentConfirmedAt: new Date(),
-        },
-      },
-      { new: true, session },
-    );
+      data: { paymentConfirmed: true, paymentConfirmedAt: new Date() },
+    });
+    if (res.count === 0) return null;
+    return client.jobSession.findUnique({ where: { id: sessionId } });
   }
 }

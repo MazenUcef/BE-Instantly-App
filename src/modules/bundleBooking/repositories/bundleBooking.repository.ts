@@ -1,128 +1,139 @@
-import { ClientSession, Types } from "mongoose";
-import BundleBookingModel from "../models/bundleBooking.model";
+import { BundleBookingStatus, Prisma } from "@prisma/client";
+import prisma from "../../../shared/config/prisma";
+
+type Tx = Prisma.TransactionClient;
 
 export class BundleBookingRepository {
   static createBooking(
     data: {
-      bundleId: Types.ObjectId | string;
-      supplierId: Types.ObjectId | string;
-      customerId: Types.ObjectId | string;
-      categoryId: Types.ObjectId | string;
-      governmentId: Types.ObjectId | string;
+      bundleId: string;
+      supplierId: string;
+      customerId: string;
+      categoryId: string;
+      governmentId: string;
       address: string;
       notes?: string | null;
       bookedDate: string;
       slotStart: string;
       slotEnd: string;
       scheduledAt: Date | string;
-      status?: string;
+      status?: BundleBookingStatus;
       paymentConfirmed?: boolean;
       selectedWorkflow?: string | null;
       finalPrice: number;
       rejectionReason?: string | null;
     },
-    session?: ClientSession,
+    tx?: Tx,
   ) {
-    return BundleBookingModel.create([data], { session }).then(
-      (docs) => docs[0],
-    );
-  }
-
-  static findById(bookingId: Types.ObjectId | string, session?: ClientSession) {
-    return BundleBookingModel.findById(bookingId).session(session || null);
-  }
-
-  static findSupplierBookingByStatus(
-    bookingId: Types.ObjectId | string,
-    supplierId: Types.ObjectId | string,
-    status: string,
-    session?: ClientSession,
-  ) {
-    return BundleBookingModel.findOne({
-      _id: bookingId,
-      supplierId,
-      status,
-    }).session(session || null);
-  }
-
-  static findCustomerBookings(
-    customerId: Types.ObjectId | string,
-    status?: string,
-  ) {
-    const filter: any = { customerId };
-    if (status) filter.status = status;
-
-    return BundleBookingModel.find(filter).sort({
-      scheduledAt: 1,
-      createdAt: -1,
+    return (tx ?? prisma).bundleBooking.create({
+      data: {
+        bundleId: data.bundleId,
+        supplierId: data.supplierId,
+        customerId: data.customerId,
+        categoryId: data.categoryId,
+        governmentId: data.governmentId,
+        address: data.address,
+        notes: data.notes ?? null,
+        bookedDate: data.bookedDate,
+        slotStart: data.slotStart,
+        slotEnd: data.slotEnd,
+        scheduledAt: new Date(data.scheduledAt),
+        status: data.status ?? BundleBookingStatus.pending_supplier_approval,
+        paymentConfirmed: data.paymentConfirmed ?? false,
+        selectedWorkflow: data.selectedWorkflow ?? null,
+        finalPrice: new Prisma.Decimal(data.finalPrice),
+        rejectionReason: data.rejectionReason ?? null,
+      },
     });
   }
 
-  static findSupplierBookings(
-    supplierId: Types.ObjectId | string,
-    status?: string,
-  ) {
-    const filter: any = { supplierId };
-    if (status) filter.status = status;
+  static findById(bookingId: string, tx?: Tx) {
+    return (tx ?? prisma).bundleBooking.findUnique({
+      where: { id: bookingId },
+    });
+  }
 
-    return BundleBookingModel.find(filter).sort({
-      scheduledAt: 1,
-      createdAt: -1,
+  static findSupplierBookingByStatus(
+    bookingId: string,
+    supplierId: string,
+    status: BundleBookingStatus,
+    tx?: Tx,
+  ) {
+    return (tx ?? prisma).bundleBooking.findFirst({
+      where: { id: bookingId, supplierId, status },
+    });
+  }
+
+  static findCustomerBookings(customerId: string, status?: BundleBookingStatus) {
+    return prisma.bundleBooking.findMany({
+      where: { customerId, ...(status ? { status } : {}) },
+      orderBy: [{ scheduledAt: "asc" }, { createdAt: "desc" }],
+    });
+  }
+
+  static findSupplierBookings(supplierId: string, status?: BundleBookingStatus) {
+    return prisma.bundleBooking.findMany({
+      where: { supplierId, ...(status ? { status } : {}) },
+      orderBy: [{ scheduledAt: "asc" }, { createdAt: "desc" }],
     });
   }
 
   static findOverlappingSupplierBookings(input: {
-    supplierId: Types.ObjectId | string;
+    supplierId: string;
     bookedDate: string;
-    statuses: readonly string[];
+    statuses: readonly BundleBookingStatus[];
   }) {
-    return BundleBookingModel.find({
-      supplierId: input.supplierId,
-      bookedDate: input.bookedDate,
-      status: { $in: [...input.statuses] },
+    return prisma.bundleBooking.findMany({
+      where: {
+        supplierId: input.supplierId,
+        bookedDate: input.bookedDate,
+        status: { in: [...input.statuses] },
+      },
     });
   }
 
   static findOverlappingCustomerBookings(input: {
-    customerId: Types.ObjectId | string;
+    customerId: string;
     bookedDate: string;
-    statuses: readonly string[];
+    statuses: readonly BundleBookingStatus[];
   }) {
-    return BundleBookingModel.find({
-      customerId: input.customerId,
-      bookedDate: input.bookedDate,
-      status: { $in: [...input.statuses] },
+    return prisma.bundleBooking.findMany({
+      where: {
+        customerId: input.customerId,
+        bookedDate: input.bookedDate,
+        status: { in: [...input.statuses] },
+      },
     });
   }
 
-  static findDueAcceptedBookings(session?: ClientSession) {
-    return BundleBookingModel.find({
-      status: "accepted",
-      scheduledAt: { $lte: new Date() },
-      selectedWorkflow: { $ne: null },
-    }).session(session || null);
+  static findDueAcceptedBookings(tx?: Tx) {
+    return (tx ?? prisma).bundleBooking.findMany({
+      where: {
+        status: BundleBookingStatus.accepted,
+        scheduledAt: { lte: new Date() },
+        selectedWorkflow: { not: null },
+      },
+    });
   }
 
-  static markInProgress(
-    bookingId: Types.ObjectId | string,
-    session?: ClientSession,
-  ) {
-    return BundleBookingModel.findOneAndUpdate(
-      { _id: bookingId, status: "accepted" },
-      { $set: { status: "in_progress" } },
-      { new: true, session },
-    );
+  static async markInProgress(bookingId: string, tx?: Tx) {
+    const client = tx ?? prisma;
+    const res = await client.bundleBooking.updateMany({
+      where: { id: bookingId, status: BundleBookingStatus.accepted },
+      data: { status: BundleBookingStatus.in_progress },
+    });
+    if (res.count === 0) return null;
+    return client.bundleBooking.findUnique({ where: { id: bookingId } });
   }
 
   static updateBooking(
-    bookingId: Types.ObjectId | string,
-    update: Record<string, any>,
-    session?: ClientSession,
+    bookingId: string,
+    update: Prisma.BundleBookingUpdateInput,
+    tx?: Tx,
   ) {
-    return BundleBookingModel.findByIdAndUpdate(
-      bookingId,
-      { $set: update },
-      { new: true, session },
-    );
+    return (tx ?? prisma).bundleBooking.update({
+      where: { id: bookingId },
+      data: update,
+    });
   }
 }

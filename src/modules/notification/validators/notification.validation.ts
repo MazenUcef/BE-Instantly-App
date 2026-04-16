@@ -20,7 +20,7 @@ const handleValidationErrors = (
 };
 
 export const validateCreateNotification: RequestHandler[] = [
-  body("userId").notEmpty().isMongoId().withMessage("Valid userId is required"),
+  body("userId").notEmpty().isUUID().withMessage("Valid userId is required"),
   body("type").notEmpty().isString().trim().isLength({ min: 1, max: 100 }),
   body("title").notEmpty().isString().trim().isLength({ min: 1, max: 200 }),
   body("message").notEmpty().isString().trim().isLength({ min: 1, max: 2000 }),
@@ -29,7 +29,7 @@ export const validateCreateNotification: RequestHandler[] = [
 ];
 
 export const validateNotificationIdParam: RequestHandler[] = [
-  param("id").isMongoId().withMessage("Invalid notification id"),
+  param("id").isUUID().withMessage("Invalid notification id"),
   handleValidationErrors,
 ];
 

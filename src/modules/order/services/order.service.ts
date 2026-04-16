@@ -1,13 +1,10 @@
-import mongoose from "mongoose";
-import OrderModel from "../models/Order.model";
-import sessionModel from "../../session/models/session.model";
-import UserModel from "../../auth/models/User.model";
-import OfferModel from "../../offer/models/Offer.model";
-import governmentModel from "../../government/models/Government.model";
-import categoryModel from "../../category/models/Category.model";
-import BundleBookingModel from "../../bundleBooking/models/bundleBooking.model";
-import bundleModel from "../../bundle/models/bundle.model";
-import ReviewModel from "../../review/models/review.model";
+import prisma from "../../../shared/config/prisma";
+import {
+  OrderStatus,
+  OfferStatus,
+  SessionStatus,
+  Prisma,
+} from "@prisma/client";
 import { AppError } from "../../../shared/middlewares/errorHandler";
 import { OrderRepository } from "../repositories/order.repository";
 import { OrderEventService } from "./order-event.service";
@@ -16,22 +13,16 @@ import {
   ORDER_CANCELLED_BY,
   ORDER_STATUS,
 } from "../../../shared/constants/order.constants";
-import {
-  getIO,
-  socketEvents,
-  socketRooms,
-} from "../../../shared/config/socket";
-import {
-  SESSION_STATUS,
-  SESSION_CANCELLED_BY,
-} from "../../../shared/constants/session.constants";
-import { OFFER_STATUS } from "../../../shared/constants/offer.constants";
+import { getIO, socketEvents, socketRooms } from "../../../shared/config/socket";
+import { SESSION_CANCELLED_BY } from "../../../shared/constants/session.constants";
 import { SessionEventService } from "../../session/services/session-event.service";
 import {
   assertValidOrderTransition,
   canCustomerCancelOrder,
 } from "../helpers/order-state";
 import { uploadFileToCloudinary } from "../../../shared/utils/cloudinary";
+
+type Tx = Prisma.TransactionClient;
 
 export class OrderService {
   private static async validateOrderDependencies(input: {
@@ -41,18 +32,15 @@ export class OrderService {
     selectedWorkflow: string;
   }) {
     const [government, category] = await Promise.all([
-      governmentModel.findById(input.governmentId),
-      categoryModel.findById(input.categoryId),
+      prisma.government.findUnique({ where: { id: input.governmentId } }),
+      prisma.category.findUnique({
+        where: { id: input.categoryId },
+        include: { workflows: true },
+      }),
     ]);
 
-    if (!government) {
-      throw new AppError("Invalid government", 400);
-    }
-
-    if (!category) {
-      const error = new AppError("Invalid category", 400);
-      throw error;
-    }
+    if (!government) throw new AppError("Invalid government", 400);
+    if (!category) throw new AppError("Invalid category", 400);
 
     if (!category.jobs || !category.jobs.includes(input.jobTitle)) {
       const error = new AppError("Invalid job title for this category", 400);
@@ -60,32 +48,22 @@ export class OrderService {
       throw error;
     }
 
-    const workflow = category.workflows?.find(
-      (w) => w.key === input.selectedWorkflow,
-    );
-
+    const workflow = category.workflows.find((w) => w.key === input.selectedWorkflow);
     if (!workflow) {
       const error = new AppError("Invalid workflow for this category", 400);
-      (error as any).availableWorkflows = (category.workflows || []).map(
-        (w) => w.key,
-      );
+      (error as any).availableWorkflows = category.workflows.map((w) => w.key);
       throw error;
     }
 
     return { government, category };
   }
 
-  private static async ensureCustomerCanCreateOrder(
-    customerId: string,
-    dbSession?: any,
-  ) {
-    const [inProgressOrder, pendingOrder, unfinishedReview] = await Promise.all(
-      [
-        OrderRepository.findCustomerInProgressOrder(customerId, dbSession),
-        OrderRepository.findCustomerPendingOrder(customerId, dbSession),
-        OrderRepository.findCustomerPendingReviewOrder(customerId, dbSession),
-      ],
-    );
+  private static async ensureCustomerCanCreateOrder(customerId: string, tx?: Tx) {
+    const [inProgressOrder, pendingOrder, unfinishedReview] = await Promise.all([
+      OrderRepository.findCustomerInProgressOrder(customerId, tx),
+      OrderRepository.findCustomerPendingOrder(customerId, tx),
+      OrderRepository.findCustomerPendingReviewOrder(customerId, tx),
+    ]);
 
     if (inProgressOrder) {
       throw new AppError(
@@ -93,19 +71,11 @@ export class OrderService {
         400,
       );
     }
-
     if (pendingOrder) {
-      throw new AppError(
-        "You already have a pending order waiting for offers.",
-        400,
-      );
+      throw new AppError("You already have a pending order waiting for offers.", 400);
     }
-
     if (unfinishedReview) {
-      const error = new AppError(
-        "You have to review and rate your last order",
-        403,
-      );
+      const error = new AppError("You have to review and rate your last order", 403);
       (error as any).reviewRequired = true;
       (error as any).order = unfinishedReview;
       throw error;
@@ -149,14 +119,12 @@ export class OrderService {
 
     const normalizedExpectedDays =
       orderType === "daily" ? expectedDays ?? null : null;
-
     if (orderType === "daily" && (!normalizedExpectedDays || normalizedExpectedDays < 1)) {
       throw new AppError("expectedDays is required for daily orders", 400);
     }
 
     const normalizedEstimatedDuration =
       orderType === "contract" ? estimatedDuration ?? null : null;
-
     if (
       orderType === "contract" &&
       (!normalizedEstimatedDuration || normalizedEstimatedDuration < 1)
@@ -164,84 +132,65 @@ export class OrderService {
       throw new AppError("estimatedDuration is required for contract orders", 400);
     }
 
-    // Upload files to Cloudinary before the transaction
     const [uploadedImages, uploadedFiles] = await Promise.all([
-      Promise.all(
-        imageFiles.map((file) => uploadFileToCloudinary(file, "orders/images")),
-      ),
-      Promise.all(
-        docFiles.map((file) => uploadFileToCloudinary(file, "orders/files")),
-      ),
+      Promise.all(imageFiles.map((file) => uploadFileToCloudinary(file, "orders/images"))),
+      Promise.all(docFiles.map((file) => uploadFileToCloudinary(file, "orders/files"))),
     ]);
 
-    const images = uploadedImages.map((r) => ({
-      url: r.secure_url,
-      publicId: r.public_id,
-    }));
-
+    const images = uploadedImages.map((r) => ({ url: r.secure_url, publicId: r.public_id }));
     const files = uploadedFiles.map((r, i) => ({
       url: r.secure_url,
       publicId: r.public_id,
       originalName: docFiles[i].originalname,
     }));
 
-    const dbSession = await mongoose.startSession();
-    let order: any;
+    if (!requestedPrice || requestedPrice <= 0) {
+      throw new AppError("Price is required", 400);
+    }
 
-    try {
-      await dbSession.withTransaction(async () => {
-        if (!requestedPrice || requestedPrice <= 0) {
-          throw new AppError("Price is required", 400);
-        }
+    await this.validateOrderDependencies({
+      categoryId,
+      governmentId,
+      jobTitle,
+      selectedWorkflow,
+    });
 
-        await this.validateOrderDependencies({
+    const order = await prisma.$transaction(async (tx) => {
+      await this.ensureCustomerCanCreateOrder(customerId, tx);
+      return OrderRepository.createOrder(
+        {
+          customerId,
+          customerName,
+          address,
+          description,
           categoryId,
           governmentId,
           jobTitle,
+          requestedPrice,
+          timeToStart: timeToStart || null,
+          orderType,
           selectedWorkflow,
-        });
-
-        await this.ensureCustomerCanCreateOrder(customerId, dbSession);
-
-        order = await OrderRepository.createOrder(
-          {
-            customerId,
-            customerName,
-            address,
-            description,
-            categoryId,
-            governmentId,
-            jobTitle,
-            requestedPrice,
-            timeToStart: timeToStart || null,
-            orderType,
-            selectedWorkflow,
-            expectedDays: normalizedExpectedDays,
-            estimatedDuration: normalizedEstimatedDuration,
-            images,
-            files,
-            status: ORDER_STATUS.PENDING,
-          },
-          dbSession,
-        );
-      });
-    } finally {
-      await dbSession.endSession();
-    }
+          expectedDays: normalizedExpectedDays,
+          estimatedDuration: normalizedEstimatedDuration,
+          images,
+          files,
+          status: OrderStatus.pending,
+        },
+        tx,
+      );
+    });
 
     const payload = await OrderEventService.emitOrderCreated(
-      order._id.toString(),
+      order.id,
       categoryId,
       governmentId,
+      input.customerId,
     );
 
     return {
       success: true,
       message: "Order created successfully",
-      data: {
-        ...payload,
-        selectedJobTitle: jobTitle,
-      },
+      data: { ...payload, selectedJobTitle: jobTitle },
     };
   }
 
@@ -253,16 +202,9 @@ export class OrderService {
     const { orderId, customerId, requestedPrice } = input;
 
     const order = await OrderRepository.findById(orderId);
-
-    if (!order) {
-      throw new AppError("Order not found", 404);
-    }
-
-    if (order.customerId.toString() !== customerId) {
-      throw new AppError("Not allowed", 403);
-    }
-
-    if (order.status !== ORDER_STATUS.PENDING) {
+    if (!order) throw new AppError("Order not found", 404);
+    if (order.customerId !== customerId) throw new AppError("Not allowed", 403);
+    if (order.status !== OrderStatus.pending) {
       throw new AppError("Cannot update price now", 400);
     }
 
@@ -270,22 +212,15 @@ export class OrderService {
       orderId,
       requestedPrice,
     );
-
-    if (!updatedOrder) {
-      throw new AppError("Order could not be updated", 409);
-    }
+    if (!updatedOrder) throw new AppError("Order could not be updated", 409);
 
     const payload = await OrderEventService.emitOrderUpdated(
-      updatedOrder._id.toString(),
-      updatedOrder.categoryId.toString(),
-      updatedOrder.governmentId.toString(),
+      updatedOrder.id,
+      updatedOrder.categoryId,
+      updatedOrder.governmentId,
     );
 
-    return {
-      success: true,
-      message: "Price updated successfully",
-      data: payload,
-    };
+    return { success: true, message: "Price updated successfully", data: payload };
   }
 
   static async cancelOrder(input: {
@@ -295,136 +230,99 @@ export class OrderService {
   }) {
     const { orderId, customerId, cancellationReason } = input;
 
-    const dbSession = await mongoose.startSession();
+    const result = await prisma.$transaction(async (tx) => {
+      const order = await OrderRepository.findById(orderId, tx);
+      if (!order) throw new AppError("Order not found", 404);
+      if (order.customerId !== customerId) throw new AppError("Not allowed", 403);
 
-    let cancelledOrder: any = null;
-    let activeSession: any = null;
-    let acceptedOffer: any = null;
-    let pendingOffers: any[] = [];
-    let flowType:
-      | "pending_cancel"
-      | "scheduled_cancel"
-      | "cancel_active_session_and_order"
-      | null = null;
-
-    try {
-      await dbSession.withTransaction(async () => {
-        const order = await OrderRepository.findById(orderId, dbSession);
-
-        if (!order) {
-          throw new AppError("Order not found", 404);
-        }
-
-        if (order.customerId.toString() !== customerId) {
-          throw new AppError("Not allowed", 403);
-        }
-
-        if (!canCustomerCancelOrder(order.status)) {
-          throw new AppError(
-            "Only pending, scheduled, or in-progress orders can be cancelled",
-            400,
-          );
-        }
-
-        assertValidOrderTransition(order.status, ORDER_STATUS.CANCELLED);
-
-        pendingOffers = await OfferModel.find({
-          orderId: order._id,
-          status: OFFER_STATUS.PENDING,
-        }).session(dbSession || null);
-
-        activeSession = await sessionModel
-          .findOne({
-            orderId: order._id,
-            status: {
-              $nin: [SESSION_STATUS.CANCELLED, SESSION_STATUS.COMPLETED],
-            },
-          })
-          .session(dbSession || null);
-
-        acceptedOffer = await OfferModel.findOne({
-          orderId: order._id,
-          status: OFFER_STATUS.ACCEPTED,
-        }).session(dbSession || null);
-
-        await OfferModel.updateMany(
-          { orderId: order._id, status: OFFER_STATUS.PENDING },
-          {
-            $set: {
-              status: OFFER_STATUS.REJECTED,
-              rejectedAt: new Date(),
-            },
-          },
-          { session: dbSession },
+      if (!canCustomerCancelOrder(order.status)) {
+        throw new AppError(
+          "Only pending, scheduled, or in-progress orders can be cancelled",
+          400,
         );
+      }
 
-        if (acceptedOffer) {
-          acceptedOffer.status = OFFER_STATUS.REJECTED;
-          acceptedOffer.rejectedAt = new Date();
-          await acceptedOffer.save({ session: dbSession });
-        }
+      assertValidOrderTransition(order.status, ORDER_STATUS.CANCELLED);
 
-        if (activeSession) {
-          await sessionModel.findOneAndUpdate(
-            {
-              _id: activeSession._id,
-              status: {
-                $nin: [SESSION_STATUS.CANCELLED, SESSION_STATUS.COMPLETED],
-              },
-            },
-            {
-              $set: {
-                status: SESSION_STATUS.CANCELLED,
-                cancelledBy: SESSION_CANCELLED_BY.CUSTOMER,
-                cancellationReason:
-                  cancellationReason || "customer_cancelled_order",
-                cancelledAt: new Date(),
-              },
-            },
-            { session: dbSession, new: true },
-          );
-        }
-
-        cancelledOrder = await OrderRepository.markCancelled(
-          {
-            orderId,
-            customerId,
-            cancelledBy: ORDER_CANCELLED_BY.CUSTOMER,
-            cancellationReason:
-              cancellationReason || "customer_cancelled_order",
-          },
-          dbSession,
-        );
-
-        if (!cancelledOrder) {
-          throw new AppError("Order not found or already cancelled", 409);
-        }
-
-        flowType =
-          order.status === ORDER_STATUS.IN_PROGRESS
-            ? "cancel_active_session_and_order"
-            : order.status === ORDER_STATUS.SCHEDULED
-              ? "scheduled_cancel"
-              : "pending_cancel";
+      const pendingOffers = await tx.offer.findMany({
+        where: { orderId: order.id, status: OfferStatus.pending },
       });
-    } finally {
-      await dbSession.endSession();
-    }
+
+      const activeSession = await tx.jobSession.findFirst({
+        where: {
+          orderId: order.id,
+          status: { notIn: [SessionStatus.cancelled, SessionStatus.completed] },
+        },
+      });
+
+      const acceptedOffer = await tx.offer.findFirst({
+        where: { orderId: order.id, status: OfferStatus.accepted },
+      });
+
+      await tx.offer.updateMany({
+        where: { orderId: order.id, status: OfferStatus.pending },
+        data: { status: OfferStatus.rejected, rejectedAt: new Date() },
+      });
+
+      if (acceptedOffer) {
+        await tx.offer.update({
+          where: { id: acceptedOffer.id },
+          data: { status: OfferStatus.rejected, rejectedAt: new Date() },
+        });
+      }
+
+      if (activeSession) {
+        await tx.jobSession.update({
+          where: { id: activeSession.id },
+          data: {
+            status: SessionStatus.cancelled,
+            cancelledBy: SESSION_CANCELLED_BY.CUSTOMER as any,
+            cancellationReason: cancellationReason || "customer_cancelled_order",
+            cancelledAt: new Date(),
+          },
+        });
+      }
+
+      const cancelledOrder = await OrderRepository.markCancelled(
+        {
+          orderId,
+          customerId,
+          cancelledBy: ORDER_CANCELLED_BY.CUSTOMER,
+          cancellationReason: cancellationReason || "customer_cancelled_order",
+        },
+        tx,
+      );
+      if (!cancelledOrder) {
+        throw new AppError("Order not found or already cancelled", 409);
+      }
+
+      const flowType =
+        order.status === OrderStatus.in_progress
+          ? "cancel_active_session_and_order"
+          : order.status === OrderStatus.scheduled
+          ? "scheduled_cancel"
+          : "pending_cancel";
+
+      return { cancelledOrder, activeSession, acceptedOffer, pendingOffers, flowType };
+    });
+
+    const { cancelledOrder, activeSession, acceptedOffer, pendingOffers, flowType } =
+      result;
 
     const io = getIO();
 
     await OrderEventService.notifySuppliersOrderCancelled(
       pendingOffers,
-      cancelledOrder._id.toString(),
+      cancelledOrder.id,
       "order_cancelled_by_customer",
     );
 
     if (acceptedOffer?.supplierId) {
-      io.to(socketRooms.user(acceptedOffer.supplierId.toString())).emit(
+      io.to(socketRooms.user(acceptedOffer.supplierId)).emit(
         socketEvents.OFFER_REJECTED,
         {
-          offerId: acceptedOffer._id.toString(),
-          orderId: cancelledOrder._id.toString(),
+          offerId: acceptedOffer.id,
+          orderId: cancelledOrder.id,
           reason: "order_cancelled_by_customer",
           timestamp: new Date(),
         },
@@ -433,12 +331,12 @@ export class OrderService {
 
     if (activeSession) {
       const sessionPayload = {
-        _id: activeSession._id.toString(),
-        orderId: activeSession.orderId.toString(),
-        offerId: activeSession.offerId.toString(),
-        customerId: activeSession.customerId.toString(),
-        supplierId: activeSession.supplierId.toString(),
-        status: SESSION_STATUS.CANCELLED,
+        _id: activeSession.id,
+        orderId: activeSession.orderId,
+        offerId: activeSession.offerId,
+        customerId: activeSession.customerId,
+        supplierId: activeSession.supplierId,
+        status: SessionStatus.cancelled,
         cancelledBy: SESSION_CANCELLED_BY.CUSTOMER,
         cancellationReason:
           activeSession.cancellationReason || "customer_cancelled_order",
@@ -453,9 +351,9 @@ export class OrderService {
     }
 
     await OrderEventService.emitOrderCancelled(
-      cancelledOrder._id.toString(),
-      cancelledOrder.categoryId.toString(),
-      cancelledOrder.governmentId.toString(),
+      cancelledOrder.id,
+      cancelledOrder.categoryId,
+      cancelledOrder.governmentId,
       {
         actorId: customerId,
         actorRole: "customer",
@@ -469,12 +367,12 @@ export class OrderService {
         flowType === "cancel_active_session_and_order"
           ? "Order cancelled and active session cancelled successfully"
           : flowType === "scheduled_cancel"
-            ? "Scheduled order cancelled successfully"
-            : "Order cancelled successfully",
+          ? "Scheduled order cancelled successfully"
+          : "Order cancelled successfully",
       data: {
-        orderId: cancelledOrder._id.toString(),
+        orderId: cancelledOrder.id,
         orderStatus: cancelledOrder.status,
-        sessionId: activeSession?._id?.toString() || null,
+        sessionId: activeSession?.id || null,
       },
     };
   }
@@ -492,29 +390,20 @@ export class OrderService {
         type: "orders_list",
         ordersWithOffers: [],
         availableOrders: [],
-        count: {
-          ordersWithOffers: 0,
-          availableOrders: 0,
-          total: 0,
-        },
+        count: { ordersWithOffers: 0, availableOrders: 0, total: 0 },
       };
     }
 
-    // Only block the supplier feed if the supplier has an active IN_PROGRESS session
-    // SCHEDULED bookings do not block — supplier can still browse & take more orders
-    const activeSession = await sessionModel.findOne({
-      supplierId,
-      status: { $nin: [SESSION_STATUS.COMPLETED, SESSION_STATUS.CANCELLED] },
+    const activeSession = await prisma.jobSession.findFirst({
+      where: {
+        supplierId,
+        status: { notIn: [SessionStatus.completed, SessionStatus.cancelled] },
+      },
     });
 
     if (activeSession && activeSession.orderId) {
-      const activeOrder = await buildSupplierOrderPayload(
-        activeSession.orderId.toString(),
-      );
-
-      if (!activeOrder) {
-        throw new AppError("Active order not found", 404);
-      }
+      const activeOrder = await buildSupplierOrderPayload(activeSession.orderId);
+      if (!activeOrder) throw new AppError("Active order not found", 404);
 
       return {
         success: true,
@@ -530,22 +419,17 @@ export class OrderService {
         governmentIds: supplierGovernmentIds,
         excludeCustomerId: supplierId,
       }),
-      OfferModel.find({
-        supplierId,
-        status: "pending",
-      }).select("orderId"),
+      prisma.offer.findMany({
+        where: { supplierId, status: OfferStatus.pending },
+        select: { orderId: true },
+      }),
     ]);
 
-    const orderIdsWithOffers = new Set(
-      supplierPendingOffers.map((offer: any) => offer.orderId.toString()),
-    );
+    const orderIdsWithOffers = new Set(supplierPendingOffers.map((o) => o.orderId));
 
     const payloads = await Promise.all(
-      allPendingOrders.map((order: any) =>
-        buildSupplierOrderPayload(order._id.toString()),
-      ),
+      allPendingOrders.map((order) => buildSupplierOrderPayload(order.id)),
     );
-
     const validPayloads = payloads.filter(Boolean);
 
     const ordersWithOffers: any[] = [];
@@ -553,7 +437,7 @@ export class OrderService {
 
     for (const payload of validPayloads) {
       if (!payload) continue;
-      if (orderIdsWithOffers.has(payload._id.toString())) {
+      if (orderIdsWithOffers.has((payload as any).id)) {
         ordersWithOffers.push(payload);
       } else {
         availableOrders.push(payload);
@@ -581,35 +465,24 @@ export class OrderService {
     governmentIds?: string[];
   }) {
     const order = await OrderRepository.findById(input.orderId);
-
-    if (!order) {
-      throw new AppError("Order not found", 404);
-    }
+    if (!order) throw new AppError("Order not found", 404);
 
     if (input.role === "customer") {
-      if (order.customerId.toString() !== input.userId) {
-        throw new AppError("Not allowed", 403);
-      }
+      if (order.customerId !== input.userId) throw new AppError("Not allowed", 403);
     }
 
     if (input.role === "supplier") {
-      const supplierGovernmentIds = new Set(
-        (input.governmentIds || []).map(String),
-      );
-
+      const supplierGovernmentIds = new Set(input.governmentIds || []);
       if (
-        order.categoryId.toString() !== String(input.categoryId) ||
-        !supplierGovernmentIds.has(order.governmentId.toString()) ||
-        order.customerId.toString() === input.userId
+        order.categoryId !== input.categoryId ||
+        !supplierGovernmentIds.has(order.governmentId) ||
+        order.customerId === input.userId
       ) {
         throw new AppError("Not allowed", 403);
       }
     }
 
-    return {
-      success: true,
-      data: order,
-    };
+    return { success: true, data: order };
   }
 
   static async getCustomerOrderHistory(input: {
@@ -653,17 +526,13 @@ export class OrderService {
 
     const fromDate = from ? new Date(from) : null;
     const toDate = to ? new Date(to) : null;
-    if (fromDate && isNaN(fromDate.getTime())) {
-      throw new AppError("Invalid 'from' date", 400);
-    }
-    if (toDate && isNaN(toDate.getTime())) {
-      throw new AppError("Invalid 'to' date", 400);
-    }
+    if (fromDate && isNaN(fromDate.getTime())) throw new AppError("Invalid 'from' date", 400);
+    if (toDate && isNaN(toDate.getTime())) throw new AppError("Invalid 'to' date", 400);
 
     const [orders, total] = await Promise.all([
       OrderRepository.findScheduledOrdersForUser({
         userId,
-        role,
+        role: role as "customer" | "supplier",
         from: fromDate,
         to: toDate,
         page,
@@ -671,27 +540,24 @@ export class OrderService {
       }),
       OrderRepository.countScheduledOrdersForUser({
         userId,
-        role,
+        role: role as "customer" | "supplier",
         from: fromDate,
         to: toDate,
       }),
     ]);
 
-    const orderIds = orders.map((o: any) => o._id);
+    const orderIds = orders.map((o) => o.id);
     const acceptedOffers = orderIds.length
-      ? await OfferModel.find({
-          orderId: { $in: orderIds },
-          status: OFFER_STATUS.ACCEPTED,
-        }).lean()
+      ? await prisma.offer.findMany({
+          where: { orderId: { in: orderIds }, status: OfferStatus.accepted },
+        })
       : [];
     const offerByOrderId = new Map<string, any>();
-    for (const off of acceptedOffers) {
-      offerByOrderId.set(String(off.orderId), off);
-    }
+    for (const off of acceptedOffers) offerByOrderId.set(off.orderId, off);
 
-    const data = orders.map((o: any) => ({
+    const data = orders.map((o) => ({
       ...o,
-      offer: offerByOrderId.get(String(o._id)) || null,
+      offer: offerByOrderId.get(o.id) || null,
     }));
 
     return {
@@ -711,7 +577,6 @@ export class OrderService {
     const { userId } = input;
 
     const activeOrder = await OrderRepository.findCustomerActiveOrder(userId);
-
     if (activeOrder) {
       return {
         success: true,
@@ -726,15 +591,25 @@ export class OrderService {
       await OrderRepository.findCustomerPendingReviewOrder(userId);
 
     if (pendingReviewOrder) {
-      const session = await sessionModel.findOne({
-        orderId: pendingReviewOrder._id,
+      const session = await prisma.jobSession.findFirst({
+        where: { orderId: pendingReviewOrder.id },
       });
 
       let supplierData = null;
       if (session?.supplierId) {
-        supplierData = await UserModel.findById(session.supplierId).select(
-          "-password -refreshToken -biometrics",
-        );
+        supplierData = await prisma.user.findUnique({
+          where: { id: session.supplierId },
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            email: true,
+            phoneNumber: true,
+            profilePicture: true,
+            averageRating: true,
+            totalReviews: true,
+          },
+        });
       }
 
       return {
@@ -767,53 +642,70 @@ export class OrderService {
     const [orders, ordersTotal, bookings, bookingsTotal] = await Promise.all([
       OrderRepository.findCustomerTimeline(userId, 1, 999),
       OrderRepository.countCustomerTimeline(userId),
-      BundleBookingModel.find({ customerId: userId }).lean(),
-      BundleBookingModel.countDocuments({ customerId: userId }),
+      prisma.bundleBooking.findMany({ where: { customerId: userId } }),
+      prisma.bundleBooking.count({ where: { customerId: userId } }),
     ]);
 
-    const enrichedOrders = await Promise.all(
-      orders.map(async (order: any) => {
-        const orderObj = order.toObject();
+    const userSelect = {
+      id: true,
+      firstName: true,
+      lastName: true,
+      email: true,
+      phoneNumber: true,
+      profilePicture: true,
+      address: true,
+      averageRating: true,
+      totalReviews: true,
+    } as const;
 
-        const [offer, session, category, government, reviews] =
-          await Promise.all([
-            OfferModel.findOne({
-              orderId: order._id,
+    const enrichedOrders = await Promise.all(
+      orders.map(async (order) => {
+        const [offer, session, category, government, reviews] = await Promise.all([
+          prisma.offer.findFirst({
+            where: {
+              orderId: order.id,
               status: {
-                $in: ["accepted", "completed", "withdrawn", "rejected"],
+                in: [
+                  OfferStatus.accepted,
+                  OfferStatus.completed,
+                  OfferStatus.withdrawn,
+                  OfferStatus.rejected,
+                ],
               },
-            })
-              .sort({ updatedAt: -1 })
-              .lean(),
-            sessionModel
-              .findOne({ orderId: order._id })
-              .sort({ createdAt: -1 })
-              .lean(),
-            categoryModel
-              .findById(order.categoryId)
-              .select("name")
-              .lean(),
-            governmentModel
-              .findById(order.governmentId)
-              .select("name nameAr")
-              .lean(),
-            ReviewModel.find({ orderId: order._id }).lean(),
-          ]);
+            },
+            orderBy: { updatedAt: "desc" },
+          }),
+          prisma.jobSession.findFirst({
+            where: { orderId: order.id },
+            orderBy: { createdAt: "desc" },
+          }),
+          prisma.category.findUnique({
+            where: { id: order.categoryId },
+            select: { name: true },
+          }),
+          prisma.government.findUnique({
+            where: { id: order.governmentId },
+            select: { name: true, nameAr: true },
+          }),
+          prisma.review.findMany({ where: { orderId: order.id } }),
+        ]);
 
         const [supplier, customer] = await Promise.all([
           offer?.supplierId
-            ? UserModel.findById(offer.supplierId)
-                .select("-password -refreshToken -biometrics")
-                .lean()
+            ? prisma.user.findUnique({
+                where: { id: offer.supplierId },
+                select: userSelect,
+              })
             : null,
-          UserModel.findById(order.customerId)
-            .select("-password -refreshToken -biometrics")
-            .lean(),
+          prisma.user.findUnique({
+            where: { id: order.customerId },
+            select: userSelect,
+          }),
         ]);
 
         return {
           type: "order" as const,
-          ...orderObj,
+          ...order,
           category: category || null,
           government: government || null,
           customer: customer || null,
@@ -825,31 +717,29 @@ export class OrderService {
     );
 
     const enrichedBookings = await Promise.all(
-      bookings.map(async (booking: any) => {
-        const [
-          bundle,
-          supplier,
-          customer,
-          session,
-          category,
-          government,
-          reviews,
-        ] = await Promise.all([
-          bundleModel.findById(booking.bundleId).lean(),
-          UserModel.findById(booking.supplierId)
-            .select("-password -refreshToken -biometrics")
-            .lean(),
-          UserModel.findById(booking.customerId)
-            .select("-password -refreshToken -biometrics")
-            .lean(),
-          sessionModel.findOne({ bundleBookingId: booking._id }).lean(),
-          categoryModel.findById(booking.categoryId).select("name").lean(),
-          governmentModel
-            .findById(booking.governmentId)
-            .select("name nameAr")
-            .lean(),
-          ReviewModel.find({ orderId: booking._id }).lean(),
-        ]);
+      bookings.map(async (booking) => {
+        const [bundle, supplier, customer, session, category, government, reviews] =
+          await Promise.all([
+            prisma.bundle.findUnique({ where: { id: booking.bundleId } }),
+            prisma.user.findUnique({
+              where: { id: booking.supplierId },
+              select: userSelect,
+            }),
+            prisma.user.findUnique({
+              where: { id: booking.customerId },
+              select: userSelect,
+            }),
+            prisma.jobSession.findFirst({ where: { bundleBookingId: booking.id } }),
+            prisma.category.findUnique({
+              where: { id: booking.categoryId },
+              select: { name: true },
+            }),
+            prisma.government.findUnique({
+              where: { id: booking.governmentId },
+              select: { name: true, nameAr: true },
+            }),
+            prisma.review.findMany({ where: { orderId: booking.id } }),
+          ]);
 
         return {
           type: "bundle_booking" as const,

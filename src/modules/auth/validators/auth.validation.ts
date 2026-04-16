@@ -141,7 +141,7 @@ export const validateRegister: RequestHandler[] = [
     .notEmpty()
     .withMessage("Category is required for supplier")
     .bail()
-    .isMongoId()
+    .isUUID()
     .withMessage("Invalid category ID"),
 
   body("jobTitles")
@@ -170,8 +170,8 @@ export const validateRegister: RequestHandler[] = [
 
   body("governmentIds.*")
     .if(body("role").equals(AUTH_ROLES.SUPPLIER))
-    .isMongoId()
-    .withMessage("Each government ID must be a valid Mongo ID"),
+    .isUUID()
+    .withMessage("Each government ID must be a valid UUID"),
 
   handleValidationErrors,
 ];
@@ -334,7 +334,7 @@ export const validateSwitchRole: RequestHandler[] = [
     .isIn([AUTH_ROLES.CUSTOMER, AUTH_ROLES.SUPPLIER])
     .withMessage("Target role must be either customer or supplier"),
 
-  body("categoryId").optional().isMongoId().withMessage("Invalid category ID"),
+  body("categoryId").optional().isUUID().withMessage("Invalid category ID"),
 
   body("jobs").optional().isArray().withMessage("Jobs must be an array"),
 
@@ -357,8 +357,8 @@ export const validateSwitchRole: RequestHandler[] = [
 
   body("governmentIds.*")
     .optional()
-    .isMongoId()
-    .withMessage("Each government ID must be a valid Mongo ID"),
+    .isUUID()
+    .withMessage("Each government ID must be a valid UUID"),
 
   handleValidationErrors,
 ];
@@ -397,12 +397,12 @@ export const validateChangePassword: RequestHandler[] = [
 ];
 
 export const validateGetUserById: RequestHandler[] = [
-  param("id").isMongoId().withMessage("Invalid user ID"),
+  param("id").isUUID().withMessage("Invalid user ID"),
   handleValidationErrors,
 ];
 
 export const validateUpdateUser: RequestHandler[] = [
-  param("id").isMongoId().withMessage("Invalid user ID"),
+  param("id").isUUID().withMessage("Invalid user ID"),
 
   body("firstName")
     .optional()
@@ -478,7 +478,7 @@ export const validateUpdateUser: RequestHandler[] = [
 ];
 
 export const validateDeleteUser: RequestHandler[] = [
-  param("id").isMongoId().withMessage("Invalid user ID"),
+  param("id").isUUID().withMessage("Invalid user ID"),
   handleValidationErrors,
 ];
 

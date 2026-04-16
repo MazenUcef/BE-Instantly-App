@@ -61,12 +61,12 @@ export const validateCreateGovernment: RequestHandler[] = [
 ];
 
 export const validateGetGovernmentById: RequestHandler[] = [
-  param("id").isMongoId().withMessage("Invalid government ID"),
+  param("id").isUUID().withMessage("Invalid government ID"),
   handleValidationErrors,
 ];
 
 export const validateUpdateGovernment: RequestHandler[] = [
-  param("id").isMongoId().withMessage("Invalid government ID"),
+  param("id").isUUID().withMessage("Invalid government ID"),
 
   body("name")
     .optional()
@@ -111,11 +111,11 @@ export const validateUpdateGovernment: RequestHandler[] = [
 ];
 
 export const validateDeleteGovernment: RequestHandler[] = [
-  param("id").isMongoId().withMessage("Invalid government ID"),
+  param("id").isUUID().withMessage("Invalid government ID"),
   handleValidationErrors,
 ];
 
 export const validateToggleGovernmentStatus: RequestHandler[] = [
-  param("id").isMongoId().withMessage("Invalid government ID"),
+  param("id").isUUID().withMessage("Invalid government ID"),
   handleValidationErrors,
 ];

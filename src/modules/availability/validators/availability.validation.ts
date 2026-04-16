@@ -20,7 +20,7 @@ const handleValidationErrors = (
 };
 
 export const validateSupplierCalendarQuery: RequestHandler[] = [
-  param("supplierId").isMongoId().withMessage("Invalid supplierId"),
+  param("supplierId").isUUID().withMessage("Invalid supplierId"),
   query("month")
     .notEmpty()
     .withMessage("month query is required")
@@ -31,7 +31,7 @@ export const validateSupplierCalendarQuery: RequestHandler[] = [
 ];
 
 export const validateSupplierBookedTimesQuery: RequestHandler[] = [
-  param("supplierId").isMongoId().withMessage("Invalid supplierId"),
+  param("supplierId").isUUID().withMessage("Invalid supplierId"),
   query("date")
     .notEmpty()
     .isISO8601()

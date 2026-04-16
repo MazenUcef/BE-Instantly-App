@@ -23,7 +23,7 @@ const handleValidationErrors = (
 export const validateCreateBundle: RequestHandler[] = [
   body("categoryId")
     .optional()
-    .isMongoId()
+    .isUUID()
     .withMessage("categoryId must be a valid MongoId"),
   body("governmentIds")
     .optional()
@@ -31,7 +31,7 @@ export const validateCreateBundle: RequestHandler[] = [
     .withMessage("governmentIds must be a non-empty array"),
   body("governmentIds.*")
     .optional()
-    .isMongoId()
+    .isUUID()
     .withMessage("Each governmentId must be valid"),
   body("title").notEmpty().isString().trim().isLength({ min: 1, max: 200 }),
   body("subtitle")
@@ -79,10 +79,10 @@ export const validateCreateBundle: RequestHandler[] = [
 ];
 
 export const validateUpdateBundle: RequestHandler[] = [
-  param("id").isMongoId().withMessage("Invalid bundle id"),
-  body("categoryId").optional().isMongoId(),
+  param("id").isUUID().withMessage("Invalid bundle id"),
+  body("categoryId").optional().isUUID(),
   body("governmentIds").optional().isArray({ min: 1 }),
-  body("governmentIds.*").optional().isMongoId(),
+  body("governmentIds.*").optional().isUUID(),
   body("title").optional().isString().trim().isLength({ min: 1, max: 200 }),
   body("subtitle")
     .optional({ nullable: true })
@@ -124,13 +124,13 @@ export const validateUpdateBundle: RequestHandler[] = [
 ];
 
 export const validateBundleIdParam: RequestHandler[] = [
-  param("id").isMongoId().withMessage("Invalid bundle id"),
+  param("id").isUUID().withMessage("Invalid bundle id"),
   handleValidationErrors,
 ];
 
 export const validateGetBundlesQuery: RequestHandler[] = [
-  query("categoryId").optional().isMongoId(),
-  query("governmentId").optional().isMongoId(),
-  query("supplierId").optional().isMongoId(),
+  query("categoryId").optional().isUUID(),
+  query("governmentId").optional().isUUID(),
+  query("supplierId").optional().isUUID(),
   handleValidationErrors,
 ];

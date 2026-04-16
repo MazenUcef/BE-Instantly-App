@@ -1,54 +1,98 @@
-import { ClientSession, Types } from "mongoose";
-import SupplierAvailabilityModel from "../models/availability.model";
+import { Prisma } from "@prisma/client";
+import prisma from "../../../shared/config/prisma";
+import { DEFAULT_WEEKLY_SCHEDULE } from "../../../shared/constants/availability.constants";
+
+type Tx = Prisma.TransactionClient;
+
+const withChildren = {
+  weeklySchedule: { orderBy: { dayOfWeek: "asc" as const } },
+  blockedDates: { orderBy: { date: "asc" as const } },
+};
 
 export class AvailabilityRepository {
-  static findBySupplierId(
-    supplierId: Types.ObjectId | string,
-    session?: ClientSession,
-  ) {
-    return SupplierAvailabilityModel.findOne({ supplierId }).session(session || null);
+  static findBySupplierId(supplierId: string, tx?: Tx) {
+    return (tx ?? prisma).supplierAvailability.findUnique({
+      where: { supplierId },
+      include: withChildren,
+    });
   }
 
-  static createDefaultForSupplier(
-    supplierId: Types.ObjectId | string,
-    session?: ClientSession,
-  ) {
-    return SupplierAvailabilityModel.create([{ supplierId }], { session }).then((docs) => docs[0]);
-  }
-
-  static findOrCreateBySupplierId(
-    supplierId: Types.ObjectId | string,
-    session?: ClientSession,
-  ) {
-    return SupplierAvailabilityModel.findOneAndUpdate(
-      { supplierId },
-      { $setOnInsert: { supplierId } },
-      { new: true, upsert: true, session },
-    );
-  }
-
-  static upsertAvailability(
-    supplierId: Types.ObjectId | string,
-    input: {
-      timezone: string;
-      weeklySchedule: any[];
-    },
-    session?: ClientSession,
-  ) {
-    return SupplierAvailabilityModel.findOneAndUpdate(
-      { supplierId },
-      {
-        $set: {
-          timezone: input.timezone,
-          weeklySchedule: input.weeklySchedule,
+  static createDefaultForSupplier(supplierId: string, tx?: Tx) {
+    return (tx ?? prisma).supplierAvailability.create({
+      data: {
+        supplierId,
+        weeklySchedule: {
+          create: DEFAULT_WEEKLY_SCHEDULE.map((d: any) => ({
+            dayOfWeek: d.dayOfWeek,
+            isWorking: d.isWorking,
+            startTime: d.startTime ?? null,
+            endTime: d.endTime ?? null,
+            slotDurationMinutes: d.slotDurationMinutes,
+          })),
         },
       },
-      { new: true, upsert: true, session },
-    );
+      include: withChildren,
+    });
   }
 
-  static addBlockedDate(
-    supplierId: Types.ObjectId | string,
+  static async findOrCreateBySupplierId(supplierId: string, tx?: Tx) {
+    const client = tx ?? prisma;
+    const existing = await client.supplierAvailability.findUnique({
+      where: { supplierId },
+      include: withChildren,
+    });
+    if (existing) return existing;
+    return this.createDefaultForSupplier(supplierId, tx);
+  }
+
+  static async upsertAvailability(
+    supplierId: string,
+    input: {
+      timezone: string;
+      weeklySchedule: Array<{
+        dayOfWeek: number;
+        isWorking: boolean;
+        startTime?: string | null;
+        endTime?: string | null;
+        slotDurationMinutes: number;
+        breakStart?: string | null;
+        breakEnd?: string | null;
+      }>;
+    },
+    tx?: Tx,
+  ) {
+    const client = tx ?? prisma;
+
+    const availability = await client.supplierAvailability.upsert({
+      where: { supplierId },
+      create: { supplierId, timezone: input.timezone },
+      update: { timezone: input.timezone },
+    });
+
+    await client.weeklyScheduleItem.deleteMany({
+      where: { availabilityId: availability.id },
+    });
+    await client.weeklyScheduleItem.createMany({
+      data: input.weeklySchedule.map((d) => ({
+        availabilityId: availability.id,
+        dayOfWeek: d.dayOfWeek,
+        isWorking: d.isWorking,
+        startTime: d.startTime ?? null,
+        endTime: d.endTime ?? null,
+        slotDurationMinutes: d.slotDurationMinutes,
+        breakStart: d.breakStart ?? null,
+        breakEnd: d.breakEnd ?? null,
+      })),
+    });
+
+    return client.supplierAvailability.findUnique({
+      where: { supplierId },
+      include: withChildren,
+    });
+  }
+
+  static async addBlockedDate(
+    supplierId: string,
     blockedDate: {
       date: Date | string;
       reason?: string | null;
@@ -56,33 +100,42 @@ export class AvailabilityRepository {
       startTime?: string | null;
       endTime?: string | null;
     },
-    session?: ClientSession,
+    tx?: Tx,
   ) {
-    return SupplierAvailabilityModel.findOneAndUpdate(
-      { supplierId },
-      {
-        $setOnInsert: { supplierId },
-        $push: {
-          blockedDates: blockedDate,
-        },
+    const client = tx ?? prisma;
+    const availability = await this.findOrCreateBySupplierId(supplierId, tx);
+    await client.blockedDate.create({
+      data: {
+        availabilityId: availability!.id,
+        date: new Date(blockedDate.date),
+        reason: blockedDate.reason ?? null,
+        isFullDay: blockedDate.isFullDay,
+        startTime: blockedDate.startTime ?? null,
+        endTime: blockedDate.endTime ?? null,
       },
-      { new: true, upsert: true, session },
-    );
+    });
+    return client.supplierAvailability.findUnique({
+      where: { supplierId },
+      include: withChildren,
+    });
   }
 
-  static removeBlockedDate(
-    supplierId: Types.ObjectId | string,
-    blockedDateId: Types.ObjectId | string,
-    session?: ClientSession,
+  static async removeBlockedDate(
+    supplierId: string,
+    blockedDateId: string,
+    tx?: Tx,
   ) {
-    return SupplierAvailabilityModel.findOneAndUpdate(
-      { supplierId },
-      {
-        $pull: {
-          blockedDates: { _id: blockedDateId },
-        },
-      },
-      { new: true, session },
-    );
+    const client = tx ?? prisma;
+    const availability = await client.supplierAvailability.findUnique({
+      where: { supplierId },
+    });
+    if (!availability) return null;
+    await client.blockedDate.deleteMany({
+      where: { id: blockedDateId, availabilityId: availability.id },
+    });
+    return client.supplierAvailability.findUnique({
+      where: { supplierId },
+      include: withChildren,
+    });
   }
 }

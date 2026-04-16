@@ -112,7 +112,7 @@ export const validateRegister: RequestHandler[] = [
     .isString()
     .withMessage("Category ID must be a string")
     .trim()
-    .isMongoId()
+    .isUUID()
     .withMessage("Invalid category ID format"),
 
   body("jobTitles")
@@ -154,7 +154,7 @@ export const validateRegister: RequestHandler[] = [
     .trim()
     .notEmpty()
     .withMessage("Government ID cannot be empty")
-    .isMongoId()
+    .isUUID()
     .withMessage("Invalid government ID format"),
 
   handleValidationErrors,

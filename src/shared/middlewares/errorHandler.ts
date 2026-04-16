@@ -1,4 +1,5 @@
 import { Request, Response, NextFunction } from 'express';
+import multer from 'multer';
 
 export class AppError extends Error {
   public statusCode: number;
@@ -49,6 +50,40 @@ export const errorHandler = (err: Error, req: Request, res: Response, next: Next
   if (err.name === 'TokenExpiredError') {
     const message = 'Token expired';
     error = new AppError(message, 401);
+  }
+
+  if (err instanceof multer.MulterError) {
+    const field = (err as any).field;
+    const fieldLimits: Record<string, number> = { images: 5, files: 3 };
+    let message = err.message;
+    switch (err.code) {
+      case 'LIMIT_UNEXPECTED_FILE':
+        if (field && fieldLimits[field] !== undefined) {
+          message = `Too many files uploaded for "${field}". Maximum allowed is ${fieldLimits[field]}.`;
+        } else {
+          message = `Unexpected file field "${field}".`;
+        }
+        break;
+      case 'LIMIT_FILE_SIZE':
+        message = `File "${field}" is too large.`;
+        break;
+      case 'LIMIT_FILE_COUNT':
+        message = 'Too many files uploaded.';
+        break;
+      case 'LIMIT_PART_COUNT':
+        message = 'Too many parts in the multipart request.';
+        break;
+      case 'LIMIT_FIELD_KEY':
+        message = 'Field name is too long.';
+        break;
+      case 'LIMIT_FIELD_VALUE':
+        message = `Field "${field}" value is too long.`;
+        break;
+      case 'LIMIT_FIELD_COUNT':
+        message = 'Too many fields in the request.';
+        break;
+    }
+    error = new AppError(message, 400);
   }
 
   const statusCode = (error as any).statusCode || 500;

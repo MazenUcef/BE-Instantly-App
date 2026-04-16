@@ -143,7 +143,7 @@ export const validateCreateCategory: RequestHandler[] = [
 ];
 
 export const validateGetCategoryById: RequestHandler[] = [
-  param("id").isMongoId().withMessage("Invalid category ID"),
+  param("id").isUUID().withMessage("Invalid category ID"),
   handleValidationErrors,
 ];
 
@@ -152,7 +152,7 @@ export const validateUpdateCategory: RequestHandler[] = [
   parseJobsIfNeeded,
   parseWorkflowsIfNeeded,
 
-  param("id").isMongoId().withMessage("Invalid category ID"),
+  param("id").isUUID().withMessage("Invalid category ID"),
 
   body("name")
     .optional()
@@ -204,6 +204,6 @@ export const validateUpdateCategory: RequestHandler[] = [
 ];
 
 export const validateDeleteCategory: RequestHandler[] = [
-  param("id").isMongoId().withMessage("Invalid category ID"),
+  param("id").isUUID().withMessage("Invalid category ID"),
   handleValidationErrors,
 ];

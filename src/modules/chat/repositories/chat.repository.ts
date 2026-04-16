@@ -1,68 +1,70 @@
-import { ClientSession, Types } from "mongoose";
-import MessageModel from "../models/chat.model";
+import { Prisma } from "@prisma/client";
+import prisma from "../../../shared/config/prisma";
+
+type Tx = Prisma.TransactionClient;
+
+const userSelect = {
+  id: true,
+  firstName: true,
+  lastName: true,
+  profilePicture: true,
+  role: true,
+} as const;
 
 export class ChatRepository {
   static createMessage(
     data: {
-      sessionId: Types.ObjectId | string;
-      senderId: Types.ObjectId | string;
-      receiverId: Types.ObjectId | string;
+      sessionId: string;
+      senderId: string;
+      receiverId: string;
       message: string;
       deliveredAt?: Date | null;
     },
-    session?: ClientSession,
+    tx?: Tx,
   ) {
-    return MessageModel.create([data], { session }).then((docs) => docs[0]);
+    return (tx ?? prisma).message.create({
+      data: {
+        sessionId: data.sessionId,
+        senderId: data.senderId,
+        receiverId: data.receiverId,
+        message: data.message,
+        deliveredAt: data.deliveredAt ?? null,
+      },
+    });
   }
 
-  static findMessagesBySession(
-    sessionId: Types.ObjectId | string,
-    page = 1,
-    limit = 50,
-  ) {
+  static findMessagesBySession(sessionId: string, page = 1, limit = 50) {
     const skip = (page - 1) * limit;
-
-    return MessageModel.find({ sessionId })
-      .sort({ createdAt: -1 })
-      .skip(skip)
-      .limit(limit)
-      .populate("senderId", "firstName lastName profilePicture role")
-      .populate("receiverId", "firstName lastName profilePicture role");
+    return prisma.message.findMany({
+      where: { sessionId },
+      orderBy: { createdAt: "desc" },
+      skip,
+      take: limit,
+      include: {
+        sender: { select: userSelect },
+        receiver: { select: userSelect },
+      },
+    });
   }
 
-  static countMessagesBySession(sessionId: Types.ObjectId | string) {
-    return MessageModel.countDocuments({ sessionId });
+  static countMessagesBySession(sessionId: string) {
+    return prisma.message.count({ where: { sessionId } });
   }
 
   static markSessionMessagesAsRead(
-    sessionId: Types.ObjectId | string,
-    receiverId: Types.ObjectId | string,
-    session?: ClientSession,
+    sessionId: string,
+    receiverId: string,
+    tx?: Tx,
   ) {
-    return MessageModel.updateMany(
-      {
-        sessionId,
-        receiverId,
-        read: false,
-      },
-      {
-        $set: {
-          read: true,
-          readAt: new Date(),
-        },
-      },
-      { session },
-    );
+    return (tx ?? prisma).message.updateMany({
+      where: { sessionId, receiverId, read: false },
+      data: { read: true, readAt: new Date() },
+    });
   }
 
-  static countUnreadBySessionForUser(
-    sessionId: Types.ObjectId | string,
-    receiverId: Types.ObjectId | string,
-  ) {
-    return MessageModel.countDocuments({
-      sessionId,
-      receiverId,
-      read: false,
+  static countUnreadBySessionForUser(sessionId: string, receiverId: string) {
+    return prisma.message.count({
+      where: { sessionId, receiverId, read: false },
     });
   }
 }

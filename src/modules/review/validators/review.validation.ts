@@ -25,7 +25,7 @@ export const validateCreateReview: RequestHandler[] = [
     .notEmpty()
     .withMessage("Order ID is required")
     .bail()
-    .isMongoId()
+    .isUUID()
     .withMessage("Invalid order ID"),
 
   body("rating")
@@ -58,17 +58,17 @@ export const validateCreateReview: RequestHandler[] = [
 ];
 
 export const validateGetReviewById: RequestHandler[] = [
-  param("id").isMongoId().withMessage("Invalid review ID"),
+  param("id").isUUID().withMessage("Invalid review ID"),
   handleValidationErrors,
 ];
 
 export const validateGetOrderReviews: RequestHandler[] = [
-  param("orderId").isMongoId().withMessage("Invalid order ID"),
+  param("orderId").isUUID().withMessage("Invalid order ID"),
   handleValidationErrors,
 ];
 
 export const validateGetUserReviews: RequestHandler[] = [
-  param("userId").isMongoId().withMessage("Invalid user ID"),
+  param("userId").isUUID().withMessage("Invalid user ID"),
 
   query("page")
     .optional()

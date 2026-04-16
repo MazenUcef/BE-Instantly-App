@@ -1,8 +1,10 @@
-import mongoose, { ClientSession } from "mongoose";
-import BundleBookingModel from "../models/bundleBooking.model";
-import UserModel from "../../auth/models/User.model";
-import bundleModel from "../../bundle/models/bundle.model";
-import CategoryModel from "../../category/models/Category.model";
+import prisma from "../../../shared/config/prisma";
+import {
+  Prisma,
+  BundleBookingStatus,
+  OrderStatus,
+  SessionStatus,
+} from "@prisma/client";
 import { AppError } from "../../../shared/middlewares/errorHandler";
 import { BundleBookingRepository } from "../repositories/bundleBooking.repository";
 import { overlapsTimeRange, minutesToTime } from "../../../shared/utils/calendar";
@@ -20,29 +22,36 @@ import {
 import { SessionRepository } from "../../session/repositories/session.repository";
 import { SessionEventService } from "../../session/services/session-event.service";
 import { SESSION_STATUS } from "../../../shared/constants/session.constants";
-import OrderModel from "../../order/models/Order.model";
-import { ORDER_STATUS } from "../../../shared/constants/order.constants";
+
+type Tx = Prisma.TransactionClient;
+
+const BUNDLE_ACTIVE_ENUM = BUNDLE_BOOKING_ACTIVE_SLOT_STATUSES.map(
+  (s) => s as BundleBookingStatus,
+);
+
+const userSelect = {
+  id: true,
+  firstName: true,
+  lastName: true,
+  email: true,
+  phoneNumber: true,
+  profilePicture: true,
+  address: true,
+  averageRating: true,
+  totalReviews: true,
+} as const;
 
 const buildBundleBookingPayload = async (bookingId: string) => {
-  const booking = await BundleBookingModel.findById(bookingId).lean();
+  const booking = await prisma.bundleBooking.findUnique({ where: { id: bookingId } });
   if (!booking) return null;
 
   const [bundle, supplier, customer] = await Promise.all([
-    bundleModel.findById(booking.bundleId).lean(),
-    UserModel.findById(booking.supplierId)
-      .select("-password -refreshToken -biometrics")
-      .lean(),
-    UserModel.findById(booking.customerId)
-      .select("-password -refreshToken -biometrics")
-      .lean(),
+    prisma.bundle.findUnique({ where: { id: booking.bundleId } }),
+    prisma.user.findUnique({ where: { id: booking.supplierId }, select: userSelect }),
+    prisma.user.findUnique({ where: { id: booking.customerId }, select: userSelect }),
   ]);
 
-  return {
-    ...booking,
-    bundle,
-    supplier,
-    customer,
-  };
+  return { ...booking, bundle, supplier, customer };
 };
 
 export class BundleBookingService {
@@ -53,23 +62,18 @@ export class BundleBookingService {
     slotStart: string;
     slotEnd: string;
     excludeBookingId?: string;
-    session?: any;
+    tx?: Tx;
   }) {
-    // Check against supplier's other bundle bookings
+    const client = input.tx ?? prisma;
+
     const existing = await BundleBookingRepository.findOverlappingSupplierBookings({
       supplierId: input.supplierId,
       bookedDate: input.bookedDate,
-      statuses: BUNDLE_BOOKING_ACTIVE_SLOT_STATUSES,
+      statuses: BUNDLE_ACTIVE_ENUM,
     });
 
     for (const booking of existing) {
-      if (
-        input.excludeBookingId &&
-        String(booking._id) === String(input.excludeBookingId)
-      ) {
-        continue;
-      }
-
+      if (input.excludeBookingId && booking.id === input.excludeBookingId) continue;
       if (
         overlapsTimeRange(
           input.slotStart,
@@ -82,16 +86,17 @@ export class BundleBookingService {
       }
     }
 
-    // Check against supplier's scheduled/in-progress orders
     const dayStart = new Date(input.bookedDate + "T00:00:00.000Z");
     const dayEnd = new Date(input.bookedDate + "T23:59:59.999Z");
 
-    const supplierOrders = await OrderModel.find({
-      supplierId: input.supplierId,
-      status: { $in: [ORDER_STATUS.SCHEDULED, ORDER_STATUS.IN_PROGRESS] },
-      scheduledAt: { $gte: dayStart, $lte: dayEnd },
-      estimatedDuration: { $ne: null },
-    }).session(input.session || null);
+    const supplierOrders = await client.order.findMany({
+      where: {
+        supplierId: input.supplierId,
+        status: { in: [OrderStatus.scheduled, OrderStatus.in_progress] },
+        scheduledAt: { gte: dayStart, lte: dayEnd },
+        estimatedDuration: { not: null },
+      },
+    });
 
     for (const order of supplierOrders) {
       const startDate = new Date(order.scheduledAt!);
@@ -105,29 +110,37 @@ export class BundleBookingService {
       }
     }
 
-    // Check customer conflicts if customerId provided
     if (input.customerId) {
-      const customerBookings = await BundleBookingRepository.findOverlappingCustomerBookings({
-        customerId: input.customerId,
-        bookedDate: input.bookedDate,
-        statuses: BUNDLE_BOOKING_ACTIVE_SLOT_STATUSES,
-      });
+      const customerBookings = await BundleBookingRepository.findOverlappingCustomerBookings(
+        {
+          customerId: input.customerId,
+          bookedDate: input.bookedDate,
+          statuses: BUNDLE_ACTIVE_ENUM,
+        },
+      );
 
       for (const booking of customerBookings) {
-        if (input.excludeBookingId && String(booking._id) === String(input.excludeBookingId)) {
-          continue;
-        }
-        if (overlapsTimeRange(input.slotStart, input.slotEnd, booking.slotStart, booking.slotEnd)) {
+        if (input.excludeBookingId && booking.id === input.excludeBookingId) continue;
+        if (
+          overlapsTimeRange(
+            input.slotStart,
+            input.slotEnd,
+            booking.slotStart,
+            booking.slotEnd,
+          )
+        ) {
           return false;
         }
       }
 
-      const customerOrders = await OrderModel.find({
-        customerId: input.customerId,
-        status: { $in: [ORDER_STATUS.SCHEDULED, ORDER_STATUS.IN_PROGRESS] },
-        scheduledAt: { $gte: dayStart, $lte: dayEnd },
-        estimatedDuration: { $ne: null },
-      }).session(input.session || null);
+      const customerOrders = await client.order.findMany({
+        where: {
+          customerId: input.customerId,
+          status: { in: [OrderStatus.scheduled, OrderStatus.in_progress] },
+          scheduledAt: { gte: dayStart, lte: dayEnd },
+          estimatedDuration: { not: null },
+        },
+      });
 
       for (const order of customerOrders) {
         const startDate = new Date(order.scheduledAt!);
@@ -147,26 +160,21 @@ export class BundleBookingService {
 
   private static async getBookingForActor(bookingId: string, userId: string) {
     const booking = await BundleBookingRepository.findById(bookingId);
+    if (!booking) throw new AppError("Booking not found", 404);
 
-    if (!booking) {
-      throw new AppError("Booking not found", 404);
-    }
-
-    const isCustomer = String(booking.customerId) === String(userId);
-    const isSupplier = String(booking.supplierId) === String(userId);
-
-    if (!isCustomer && !isSupplier) {
-      throw new AppError("Not allowed", 403);
-    }
+    const isCustomer = booking.customerId === userId;
+    const isSupplier = booking.supplierId === userId;
+    if (!isCustomer && !isSupplier) throw new AppError("Not allowed", 403);
 
     return { booking, isCustomer, isSupplier };
   }
 
   private static async guardSessionManaged(bookingId: string) {
-    const SessionModel = (await import("../../session/models/session.model")).default;
-    const session = await SessionModel.findOne({
-      bundleBookingId: bookingId,
-      status: { $nin: ["completed", "cancelled"] },
+    const session = await prisma.jobSession.findFirst({
+      where: {
+        bundleBookingId: bookingId,
+        status: { notIn: [SessionStatus.completed, SessionStatus.cancelled] },
+      },
     });
     if (session) {
       throw new AppError(
@@ -179,27 +187,21 @@ export class BundleBookingService {
   private static async resolveWorkflowSteps(
     categoryId: string,
     selectedWorkflow: string,
-    dbSession?: ClientSession,
+    tx: Tx,
   ): Promise<string[]> {
-    const category = await CategoryModel.findById(categoryId).session(dbSession || null);
+    const category = await tx.category.findUnique({
+      where: { id: categoryId },
+      include: { workflows: true },
+    });
     if (!category) throw new AppError("Category not found", 404);
-
-    const workflow = category.workflows?.find((w) => w.key === selectedWorkflow);
-    if (!workflow) throw new AppError("Workflow not found for this booking's category", 400);
-
+    const workflow = category.workflows.find((w) => w.key === selectedWorkflow);
+    if (!workflow) {
+      throw new AppError("Workflow not found for this booking's category", 400);
+    }
     return workflow.steps;
   }
 
-  /**
-   * After a booking is accepted, check if scheduledAt is now or future.
-   * - Now → create session immediately, move booking to in_progress
-   * - Future → keep as accepted (session created later when time arrives)
-   * Returns the session doc if created, null otherwise.
-   */
-  private static async handlePostAccept(
-    booking: any,
-    dbSession: ClientSession,
-  ) {
+  private static async handlePostAccept(booking: any, tx: Tx) {
     const scheduledAt = new Date(booking.scheduledAt);
     const isScheduled = scheduledAt > new Date();
 
@@ -212,27 +214,27 @@ export class BundleBookingService {
     }
 
     const workflowSteps = await this.resolveWorkflowSteps(
-      String(booking.categoryId),
+      booking.categoryId,
       booking.selectedWorkflow,
-      dbSession,
+      tx,
     );
 
     const sessionDoc = await SessionRepository.createSession(
       {
-        bundleBookingId: booking._id,
+        bundleBookingId: booking.id,
         customerId: booking.customerId,
         supplierId: booking.supplierId,
         workflowSteps,
         status: SESSION_STATUS.STARTED,
         startedAt: new Date(),
       },
-      dbSession,
+      tx,
     );
 
     await BundleBookingRepository.updateBooking(
-      String(booking._id),
-      { status: BUNDLE_BOOKING_STATUS.IN_PROGRESS },
-      dbSession,
+      booking.id,
+      { status: BundleBookingStatus.in_progress },
+      tx,
     );
 
     return { sessionDoc, isScheduled: false };
@@ -265,61 +267,50 @@ export class BundleBookingService {
       throw new AppError("slotStart must be before slotEnd", 400);
     }
 
-    const bundle = await bundleModel.findById(bundleId);
-
+    const bundle = await prisma.bundle.findUnique({ where: { id: bundleId } });
     if (!bundle || !bundle.isActive) {
       throw new AppError("Bundle not found or inactive", 404);
     }
-
-    if (String(bundle.supplierId) === String(customerId)) {
+    if (bundle.supplierId === customerId) {
       throw new AppError("You cannot book your own bundle", 400);
     }
 
-    const dbSession = await mongoose.startSession();
-    let createdBooking: any;
+    const createdBooking = await prisma.$transaction(async (tx) => {
+      const slotAvailable = await this.ensureSlotAvailable({
+        supplierId: bundle.supplierId,
+        customerId,
+        bookedDate,
+        slotStart,
+        slotEnd,
+        tx,
+      });
+      if (!slotAvailable) {
+        throw new AppError("This slot is no longer available", 409);
+      }
 
-    try {
-      await dbSession.withTransaction(async () => {
-        const slotAvailable = await this.ensureSlotAvailable({
-          supplierId: String(bundle.supplierId),
+      return BundleBookingRepository.createBooking(
+        {
+          bundleId: bundle.id,
+          supplierId: bundle.supplierId,
           customerId,
+          categoryId: bundle.categoryId,
+          governmentId,
+          address: address.trim(),
+          notes: notes?.trim() || null,
           bookedDate,
           slotStart,
           slotEnd,
-          session: dbSession,
-        });
+          scheduledAt,
+          selectedWorkflow: bundle.selectedWorkflow || null,
+          status: BundleBookingStatus.pending_supplier_approval,
+          paymentConfirmed: false,
+          finalPrice: Number(bundle.price),
+        },
+        tx,
+      );
+    });
 
-        if (!slotAvailable) {
-          throw new AppError("This slot is no longer available", 409);
-        }
-
-        createdBooking = await BundleBookingRepository.createBooking(
-          {
-            bundleId: String(bundle._id),
-            supplierId: String(bundle.supplierId),
-            customerId,
-            categoryId: String(bundle.categoryId),
-            governmentId,
-            address: address.trim(),
-            notes: notes?.trim() || null,
-            bookedDate,
-            slotStart,
-            slotEnd,
-            scheduledAt,
-            selectedWorkflow: bundle.selectedWorkflow || null,
-            status: BUNDLE_BOOKING_STATUS.PENDING_SUPPLIER_APPROVAL,
-            paymentConfirmed: false,
-            finalPrice: bundle.price,
-          },
-          dbSession,
-        );
-      });
-    } finally {
-      await dbSession.endSession();
-    }
-
-    const payload = await buildBundleBookingPayload(createdBooking._id.toString());
-
+    const payload = await buildBundleBookingPayload(createdBooking.id);
     BundleBookingEventService.emitCreatedToSupplier(payload);
     await BundleBookingEventService.notifyCreated(payload, bundle.title);
 
@@ -330,125 +321,90 @@ export class BundleBookingService {
     };
   }
 
-  static async getSupplierBookings(input: {
-    supplierId: string;
-    status?: string;
-  }) {
+  static async getSupplierBookings(input: { supplierId: string; status?: string }) {
     const bookings = await BundleBookingRepository.findSupplierBookings(
       input.supplierId,
-      input.status,
+      input.status as BundleBookingStatus | undefined,
     );
 
     const enriched = await Promise.all(
-      bookings.map((item) => buildBundleBookingPayload(item._id.toString())),
+      bookings.map((item) => buildBundleBookingPayload(item.id)),
     );
 
     const validBookings = enriched.filter(Boolean);
     return {
       success: true,
       data: validBookings,
-      meta: {
-        count: validBookings.length,
-      },
+      meta: { count: validBookings.length },
     };
   }
 
-  static async getCustomerBookings(input: {
-    customerId: string;
-    status?: string;
-  }) {
+  static async getCustomerBookings(input: { customerId: string; status?: string }) {
     const bookings = await BundleBookingRepository.findCustomerBookings(
       input.customerId,
-      input.status,
+      input.status as BundleBookingStatus | undefined,
     );
 
     const enriched = await Promise.all(
-      bookings.map((item) => buildBundleBookingPayload(item._id.toString())),
+      bookings.map((item) => buildBundleBookingPayload(item.id)),
     );
 
     const validBookings = enriched.filter(Boolean);
     return {
       success: true,
       data: validBookings,
-      meta: {
-        count: validBookings.length,
-      },
+      meta: { count: validBookings.length },
     };
   }
 
-  static async getBookingById(input: {
-    bookingId: string;
-    userId: string;
-  }) {
+  static async getBookingById(input: { bookingId: string; userId: string }) {
     await this.getBookingForActor(input.bookingId, input.userId);
-
     const booking = await buildBundleBookingPayload(input.bookingId);
-
-    if (!booking) {
-      throw new AppError("Booking not found", 404);
-    }
-
-    return {
-      success: true,
-      data: booking,
-    };
+    if (!booking) throw new AppError("Booking not found", 404);
+    return { success: true, data: booking };
   }
 
-  // ── Supplier accepts the customer's proposed time ──
-  static async acceptBundleBooking(input: {
-    bookingId: string;
-    supplierId: string;
-  }) {
-    const dbSession = await mongoose.startSession();
-    let updatedBooking: any;
-    let sessionResult: { sessionDoc: any; isScheduled: boolean } = { sessionDoc: null, isScheduled: false };
+  static async acceptBundleBooking(input: { bookingId: string; supplierId: string }) {
+    const result = await prisma.$transaction(async (tx) => {
+      const booking = await BundleBookingRepository.findSupplierBookingByStatus(
+        input.bookingId,
+        input.supplierId,
+        BundleBookingStatus.pending_supplier_approval,
+        tx,
+      );
+      if (!booking) throw new AppError("Pending booking not found", 404);
 
-    try {
-      await dbSession.withTransaction(async () => {
-        const booking = await BundleBookingRepository.findSupplierBookingByStatus(
-          input.bookingId,
-          input.supplierId,
-          BUNDLE_BOOKING_STATUS.PENDING_SUPPLIER_APPROVAL,
-          dbSession,
-        );
-
-        if (!booking) {
-          throw new AppError("Pending booking not found", 404);
-        }
-
-        const slotAvailable = await this.ensureSlotAvailable({
-          supplierId: input.supplierId,
-          customerId: String(booking.customerId),
-          bookedDate: booking.bookedDate,
-          slotStart: booking.slotStart,
-          slotEnd: booking.slotEnd,
-          excludeBookingId: String(booking._id),
-          session: dbSession,
-        });
-
-        if (!slotAvailable) {
-          throw new AppError("Booking slot is no longer available", 409);
-        }
-
-        updatedBooking = await BundleBookingRepository.updateBooking(
-          String(booking._id),
-          {
-            status: BUNDLE_BOOKING_STATUS.ACCEPTED,
-            proposedBookedDate: null,
-            proposedSlotStart: null,
-            proposedSlotEnd: null,
-            proposedScheduledAt: null,
-          },
-          dbSession,
-        );
-
-        sessionResult = await this.handlePostAccept(updatedBooking, dbSession);
+      const slotAvailable = await this.ensureSlotAvailable({
+        supplierId: input.supplierId,
+        customerId: booking.customerId,
+        bookedDate: booking.bookedDate,
+        slotStart: booking.slotStart,
+        slotEnd: booking.slotEnd,
+        excludeBookingId: booking.id,
+        tx,
       });
-    } finally {
-      await dbSession.endSession();
-    }
+      if (!slotAvailable) {
+        throw new AppError("Booking slot is no longer available", 409);
+      }
 
-    const payload = await buildBundleBookingPayload(updatedBooking._id.toString());
+      const updated = await BundleBookingRepository.updateBooking(
+        booking.id,
+        {
+          status: BundleBookingStatus.accepted,
+          proposedBookedDate: null,
+          proposedSlotStart: null,
+          proposedSlotEnd: null,
+          proposedScheduledAt: null,
+        },
+        tx,
+      );
+
+      const sessionResult = await this.handlePostAccept(updated, tx);
+      return { updatedBooking: updated, sessionResult };
+    });
+
+    const { updatedBooking, sessionResult } = result;
+    const payload = await buildBundleBookingPayload(updatedBooking.id);
 
     BundleBookingEventService.emitAccepted(payload);
     await BundleBookingEventService.notifyAccepted(payload);
@@ -467,7 +423,7 @@ export class BundleBookingService {
         ? "Booking accepted and scheduled"
         : "Booking accepted and session started",
       data: payload,
-      sessionId: sessionResult?.sessionDoc?._id?.toString() || null,
+      sessionId: sessionResult?.sessionDoc?.id || null,
       isScheduled: sessionResult?.isScheduled ?? false,
     };
   }
@@ -480,22 +436,16 @@ export class BundleBookingService {
     const booking = await BundleBookingRepository.findSupplierBookingByStatus(
       input.bookingId,
       input.supplierId,
-      BUNDLE_BOOKING_STATUS.PENDING_SUPPLIER_APPROVAL,
+      BundleBookingStatus.pending_supplier_approval,
     );
+    if (!booking) throw new AppError("Pending booking not found", 404);
 
-    if (!booking) {
-      throw new AppError("Pending booking not found", 404);
-    }
+    const updatedBooking = await BundleBookingRepository.updateBooking(booking.id, {
+      status: BundleBookingStatus.rejected,
+      rejectionReason: input.rejectionReason?.trim() || null,
+    });
 
-    const updatedBooking = await BundleBookingRepository.updateBooking(
-      String(booking._id),
-      {
-        status: BUNDLE_BOOKING_STATUS.REJECTED,
-        rejectionReason: input.rejectionReason?.trim() || null,
-      },
-    );
-
-    const payload = await buildBundleBookingPayload(updatedBooking!._id.toString());
+    const payload = await buildBundleBookingPayload(updatedBooking.id);
 
     BundleBookingEventService.emitRejected(payload);
     await BundleBookingEventService.notifyRejected(payload);
@@ -507,7 +457,6 @@ export class BundleBookingService {
     };
   }
 
-  // ── Either party proposes a new time ──
   static async proposeTime(input: {
     bookingId: string;
     userId: string;
@@ -537,47 +486,38 @@ export class BundleBookingService {
     if (!isNegotiationStatus(booking.status)) {
       throw new AppError("Booking is not in a negotiation state", 400);
     }
-
-    // Supplier can only propose when it's pending their approval
-    if (isSupplier && booking.status !== BUNDLE_BOOKING_STATUS.PENDING_SUPPLIER_APPROVAL) {
+    if (isSupplier && booking.status !== BundleBookingStatus.pending_supplier_approval) {
+      throw new AppError("It's not your turn to propose a time", 400);
+    }
+    if (isCustomer && booking.status !== BundleBookingStatus.pending_customer_approval) {
       throw new AppError("It's not your turn to propose a time", 400);
     }
 
-    // Customer can only propose when it's pending their approval
-    if (isCustomer && booking.status !== BUNDLE_BOOKING_STATUS.PENDING_CUSTOMER_APPROVAL) {
-      throw new AppError("It's not your turn to propose a time", 400);
-    }
-
-    // Verify proposed slot is available for both parties
     const slotAvailable = await this.ensureSlotAvailable({
-      supplierId: String(booking.supplierId),
-      customerId: String(booking.customerId),
+      supplierId: booking.supplierId,
+      customerId: booking.customerId,
       bookedDate: proposedBookedDate,
       slotStart: proposedSlotStart,
       slotEnd: proposedSlotEnd,
-      excludeBookingId: String(booking._id),
+      excludeBookingId: booking.id,
     });
-
     if (!slotAvailable) {
       throw new AppError("Proposed time slot is not available", 409);
     }
 
     const nextStatus = isSupplier
-      ? BUNDLE_BOOKING_STATUS.PENDING_CUSTOMER_APPROVAL
-      : BUNDLE_BOOKING_STATUS.PENDING_SUPPLIER_APPROVAL;
+      ? BundleBookingStatus.pending_customer_approval
+      : BundleBookingStatus.pending_supplier_approval;
 
-    const updatedBooking = await BundleBookingRepository.updateBooking(
-      String(booking._id),
-      {
-        status: nextStatus,
-        proposedBookedDate,
-        proposedSlotStart,
-        proposedSlotEnd,
-        proposedScheduledAt: new Date(proposedScheduledAt),
-      },
-    );
+    const updatedBooking = await BundleBookingRepository.updateBooking(booking.id, {
+      status: nextStatus,
+      proposedBookedDate,
+      proposedSlotStart,
+      proposedSlotEnd,
+      proposedScheduledAt: new Date(proposedScheduledAt),
+    });
 
-    const payload = await buildBundleBookingPayload(updatedBooking!._id.toString());
+    const payload = await buildBundleBookingPayload(updatedBooking.id);
 
     const proposedBy = isSupplier ? "supplier" : "customer";
     BundleBookingEventService.emitTimeProposed(payload, proposedBy);
@@ -590,11 +530,7 @@ export class BundleBookingService {
     };
   }
 
-  // ── Either party accepts the other's proposed time ──
-  static async acceptProposal(input: {
-    bookingId: string;
-    userId: string;
-  }) {
+  static async acceptProposal(input: { bookingId: string; userId: string }) {
     const { booking, isCustomer, isSupplier } = await this.getBookingForActor(
       input.bookingId,
       input.userId,
@@ -603,67 +539,62 @@ export class BundleBookingService {
     if (!isNegotiationStatus(booking.status)) {
       throw new AppError("No pending proposal to accept", 400);
     }
-
-    // Can only accept when it's your turn (the other party proposed)
-    if (isSupplier && booking.status !== BUNDLE_BOOKING_STATUS.PENDING_SUPPLIER_APPROVAL) {
+    if (isSupplier && booking.status !== BundleBookingStatus.pending_supplier_approval) {
+      throw new AppError("No pending proposal for you to accept", 400);
+    }
+    if (isCustomer && booking.status !== BundleBookingStatus.pending_customer_approval) {
       throw new AppError("No pending proposal for you to accept", 400);
     }
 
-    if (isCustomer && booking.status !== BUNDLE_BOOKING_STATUS.PENDING_CUSTOMER_APPROVAL) {
-      throw new AppError("No pending proposal for you to accept", 400);
-    }
-
-    // If there's a proposed time, apply it; otherwise accept current time
-    const hasProposal = booking.proposedBookedDate && booking.proposedSlotStart && booking.proposedSlotEnd && booking.proposedScheduledAt;
+    const hasProposal =
+      booking.proposedBookedDate &&
+      booking.proposedSlotStart &&
+      booking.proposedSlotEnd &&
+      booking.proposedScheduledAt;
 
     const finalDate = hasProposal ? booking.proposedBookedDate! : booking.bookedDate;
     const finalSlotStart = hasProposal ? booking.proposedSlotStart! : booking.slotStart;
     const finalSlotEnd = hasProposal ? booking.proposedSlotEnd! : booking.slotEnd;
-    const finalScheduledAt = hasProposal ? booking.proposedScheduledAt! : booking.scheduledAt;
+    const finalScheduledAt = hasProposal
+      ? booking.proposedScheduledAt!
+      : booking.scheduledAt;
 
-    const dbSession = await mongoose.startSession();
-    let updatedBooking: any;
-    let sessionResult: { sessionDoc: any; isScheduled: boolean } = { sessionDoc: null, isScheduled: false };
+    const result = await prisma.$transaction(async (tx) => {
+      const slotAvailable = await this.ensureSlotAvailable({
+        supplierId: booking.supplierId,
+        customerId: booking.customerId,
+        bookedDate: finalDate,
+        slotStart: finalSlotStart,
+        slotEnd: finalSlotEnd,
+        excludeBookingId: booking.id,
+        tx,
+      });
+      if (!slotAvailable) {
+        throw new AppError("The time slot is no longer available", 409);
+      }
 
-    try {
-      await dbSession.withTransaction(async () => {
-        const slotAvailable = await this.ensureSlotAvailable({
-          supplierId: String(booking.supplierId),
-          customerId: String(booking.customerId),
+      const updated = await BundleBookingRepository.updateBooking(
+        booking.id,
+        {
           bookedDate: finalDate,
           slotStart: finalSlotStart,
           slotEnd: finalSlotEnd,
-          excludeBookingId: String(booking._id),
-          session: dbSession,
-        });
+          scheduledAt: finalScheduledAt,
+          status: BundleBookingStatus.accepted,
+          proposedBookedDate: null,
+          proposedSlotStart: null,
+          proposedSlotEnd: null,
+          proposedScheduledAt: null,
+        },
+        tx,
+      );
 
-        if (!slotAvailable) {
-          throw new AppError("The time slot is no longer available", 409);
-        }
+      const sessionResult = await this.handlePostAccept(updated, tx);
+      return { updatedBooking: updated, sessionResult };
+    });
 
-        updatedBooking = await BundleBookingRepository.updateBooking(
-          String(booking._id),
-          {
-            bookedDate: finalDate,
-            slotStart: finalSlotStart,
-            slotEnd: finalSlotEnd,
-            scheduledAt: finalScheduledAt,
-            status: BUNDLE_BOOKING_STATUS.ACCEPTED,
-            proposedBookedDate: null,
-            proposedSlotStart: null,
-            proposedSlotEnd: null,
-            proposedScheduledAt: null,
-          },
-          dbSession,
-        );
-
-        sessionResult = await this.handlePostAccept(updatedBooking, dbSession);
-      });
-    } finally {
-      await dbSession.endSession();
-    }
-
-    const payload = await buildBundleBookingPayload(updatedBooking!._id.toString());
+    const { updatedBooking, sessionResult } = result;
+    const payload = await buildBundleBookingPayload(updatedBooking.id);
 
     BundleBookingEventService.emitAccepted(payload);
     await BundleBookingEventService.notifyAccepted(payload);
@@ -682,41 +613,29 @@ export class BundleBookingService {
         ? "Proposal accepted, booking scheduled"
         : "Proposal accepted, session started",
       data: payload,
-      sessionId: sessionResult?.sessionDoc?._id?.toString() || null,
+      sessionId: sessionResult?.sessionDoc?.id || null,
       isScheduled: sessionResult?.isScheduled ?? false,
     };
   }
 
-  static async startBundleBooking(input: {
-    bookingId: string;
-    supplierId: string;
-  }) {
+  static async startBundleBooking(input: { bookingId: string; supplierId: string }) {
     await this.guardSessionManaged(input.bookingId);
 
     const booking = await BundleBookingRepository.findSupplierBookingByStatus(
       input.bookingId,
       input.supplierId,
-      BUNDLE_BOOKING_STATUS.ACCEPTED,
+      BundleBookingStatus.accepted,
     );
+    if (!booking) throw new AppError("Accepted booking not found", 404);
 
-    if (!booking) {
-      throw new AppError("Accepted booking not found", 404);
-    }
+    const updatedBooking = await BundleBookingRepository.updateBooking(booking.id, {
+      status: BundleBookingStatus.in_progress,
+    });
 
-    const updatedBooking = await BundleBookingRepository.updateBooking(
-      String(booking._id),
-      { status: BUNDLE_BOOKING_STATUS.IN_PROGRESS },
-    );
-
-    const payload = await buildBundleBookingPayload(updatedBooking!._id.toString());
-
+    const payload = await buildBundleBookingPayload(updatedBooking.id);
     BundleBookingEventService.emitUpdated(payload);
 
-    return {
-      success: true,
-      message: "Booking started successfully",
-      data: payload,
-    };
+    return { success: true, message: "Booking started successfully", data: payload };
   }
 
   static async markBundleBookingDone(input: {
@@ -728,28 +647,20 @@ export class BundleBookingService {
     const booking = await BundleBookingRepository.findSupplierBookingByStatus(
       input.bookingId,
       input.supplierId,
-      BUNDLE_BOOKING_STATUS.IN_PROGRESS,
+      BundleBookingStatus.in_progress,
     );
+    if (!booking) throw new AppError("In-progress booking not found", 404);
 
-    if (!booking) {
-      throw new AppError("In-progress booking not found", 404);
-    }
+    const updatedBooking = await BundleBookingRepository.updateBooking(booking.id, {
+      status: BundleBookingStatus.done,
+    });
 
-    const updatedBooking = await BundleBookingRepository.updateBooking(
-      String(booking._id),
-      { status: BUNDLE_BOOKING_STATUS.DONE },
-    );
-
-    const payload = await buildBundleBookingPayload(updatedBooking!._id.toString());
+    const payload = await buildBundleBookingPayload(updatedBooking.id);
 
     BundleBookingEventService.emitUpdated(payload);
     await BundleBookingEventService.notifyDone(payload);
 
-    return {
-      success: true,
-      message: "Booking marked as done",
-      data: payload,
-    };
+    return { success: true, message: "Booking marked as done", data: payload };
   }
 
   static async confirmBundlePayment(input: {
@@ -761,23 +672,17 @@ export class BundleBookingService {
     const booking = await BundleBookingRepository.findSupplierBookingByStatus(
       input.bookingId,
       input.supplierId,
-      BUNDLE_BOOKING_STATUS.DONE,
+      BundleBookingStatus.done,
     );
+    if (!booking) throw new AppError("Done booking not found", 404);
 
-    if (!booking) {
-      throw new AppError("Done booking not found", 404);
-    }
+    const updatedBooking = await BundleBookingRepository.updateBooking(booking.id, {
+      paymentConfirmed: true,
+      paymentConfirmedAt: new Date(),
+      status: BundleBookingStatus.completed,
+    });
 
-    const updatedBooking = await BundleBookingRepository.updateBooking(
-      String(booking._id),
-      {
-        paymentConfirmed: true,
-        paymentConfirmedAt: new Date(),
-        status: BUNDLE_BOOKING_STATUS.COMPLETED,
-      },
-    );
-
-    const payload = await buildBundleBookingPayload(updatedBooking!._id.toString());
+    const payload = await buildBundleBookingPayload(updatedBooking.id);
 
     BundleBookingEventService.emitUpdated(payload);
     await BundleBookingEventService.notifyCompleted(payload);
@@ -789,11 +694,8 @@ export class BundleBookingService {
     };
   }
 
-  static async cancelBundleBooking(input: {
-    bookingId: string;
-    userId: string;
-  }) {
-    const { booking, isCustomer, isSupplier } = await this.getBookingForActor(
+  static async cancelBundleBooking(input: { bookingId: string; userId: string }) {
+    const { booking, isCustomer } = await this.getBookingForActor(
       input.bookingId,
       input.userId,
     );
@@ -808,19 +710,16 @@ export class BundleBookingService {
       ? BUNDLE_BOOKING_CANCELLED_BY.CUSTOMER
       : BUNDLE_BOOKING_CANCELLED_BY.SUPPLIER;
 
-    const updatedBooking = await BundleBookingRepository.updateBooking(
-      String(booking._id),
-      {
-        status: BUNDLE_BOOKING_STATUS.CANCELLED,
-        cancelledBy,
-        proposedBookedDate: null,
-        proposedSlotStart: null,
-        proposedSlotEnd: null,
-        proposedScheduledAt: null,
-      },
-    );
+    const updatedBooking = await BundleBookingRepository.updateBooking(booking.id, {
+      status: BundleBookingStatus.cancelled,
+      cancelledBy: cancelledBy as any,
+      proposedBookedDate: null,
+      proposedSlotStart: null,
+      proposedSlotEnd: null,
+      proposedScheduledAt: null,
+    });
 
-    const payload = await buildBundleBookingPayload(updatedBooking!._id.toString());
+    const payload = await buildBundleBookingPayload(updatedBooking.id);
 
     BundleBookingEventService.emitCancelled(payload);
     await BundleBookingEventService.notifyCancelled(payload, cancelledBy);

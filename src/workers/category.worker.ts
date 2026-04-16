@@ -1,5 +1,6 @@
 import { getChannel } from "../shared/config/rabbitmq";
-import UserModel from "../modules/auth/models/User.model";
+import prisma from "../shared/config/prisma";
+import { UserRole } from "@prisma/client";
 import { publishNotification } from "../modules/notification/notification.publisher";
 
 export const startCategoryWorker = async () => {
@@ -15,14 +16,15 @@ export const startCategoryWorker = async () => {
     try {
       const { categoryId, name, jobs } = payload;
 
-      const customers = await UserModel.find({ role: "customer" }).select(
-        "_id",
-      );
+      const customers = await prisma.user.findMany({
+        where: { role: UserRole.customer },
+        select: { id: true },
+      });
 
       await Promise.all(
         customers.map((customer) =>
           publishNotification({
-            userId: customer._id.toString(),
+            userId: customer.id,
             type: "NEW_CATEGORY_CREATED",
             title: "New Category Available 🎉",
             message: `A new category "${name}" is now available.`,

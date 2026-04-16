@@ -1,79 +1,105 @@
-import { ClientSession, Types } from "mongoose";
-import ReviewModel from "../models/review.model";
+import { Prisma } from "@prisma/client";
+import prisma from "../../../shared/config/prisma";
+
+type Tx = Prisma.TransactionClient;
+
+const reviewerSelect = {
+  id: true,
+  firstName: true,
+  lastName: true,
+  profilePicture: true,
+} as const;
+
+const targetSelect = {
+  id: true,
+  firstName: true,
+  lastName: true,
+  profilePicture: true,
+  averageRating: true,
+  totalReviews: true,
+} as const;
 
 export class ReviewRepository {
   static create(
     data: {
-      reviewerId: Types.ObjectId | string;
-      targetUserId: Types.ObjectId | string;
-      orderId: Types.ObjectId | string;
-      sessionId?: Types.ObjectId | string | null;
+      reviewerId: string;
+      targetUserId: string;
+      orderId: string;
+      sessionId?: string | null;
       rating: number;
       comment: string;
     },
-    session?: ClientSession,
+    tx?: Tx,
   ) {
-    return ReviewModel.create([data], { session }).then((docs) => docs[0]);
+    return (tx ?? prisma).review.create({
+      data: {
+        reviewerId: data.reviewerId,
+        targetUserId: data.targetUserId,
+        orderId: data.orderId,
+        sessionId: data.sessionId ?? null,
+        rating: data.rating,
+        comment: data.comment,
+      },
+    });
   }
 
   static findByReviewerAndOrder(
-    reviewerId: Types.ObjectId | string,
-    orderId: Types.ObjectId | string,
-    session?: ClientSession,
+    reviewerId: string,
+    orderId: string,
+    tx?: Tx,
   ) {
-    return ReviewModel.findOne({ reviewerId, orderId }).session(session || null);
+    return (tx ?? prisma).review.findUnique({
+      where: { reviewerId_orderId: { reviewerId, orderId } },
+    });
   }
 
-  static findById(reviewId: Types.ObjectId | string) {
-    return ReviewModel.findById(reviewId)
-      .populate("reviewerId", "firstName lastName profilePicture")
-      .populate("targetUserId", "firstName lastName profilePicture averageRating totalReviews");
+  static findById(reviewId: string) {
+    return prisma.review.findUnique({
+      where: { id: reviewId },
+      include: {
+        reviewer: { select: reviewerSelect },
+        target: { select: targetSelect },
+      },
+    });
   }
 
-  static findByOrderId(orderId: Types.ObjectId | string) {
-    return ReviewModel.find({ orderId })
-      .sort({ createdAt: -1 })
-      .populate("reviewerId", "firstName lastName profilePicture")
-      .populate("targetUserId", "firstName lastName profilePicture");
+  static findByOrderId(orderId: string) {
+    return prisma.review.findMany({
+      where: { orderId },
+      orderBy: { createdAt: "desc" },
+      include: {
+        reviewer: { select: reviewerSelect },
+        target: { select: reviewerSelect },
+      },
+    });
   }
 
-  static findByTargetUserId(
-    userId: Types.ObjectId | string,
-    page = 1,
-    limit = 10,
-  ) {
+  static findByTargetUserId(userId: string, page = 1, limit = 10) {
     const skip = (page - 1) * limit;
-
-    return ReviewModel.find({ targetUserId: userId })
-      .sort({ createdAt: -1 })
-      .skip(skip)
-      .limit(limit)
-      .populate("reviewerId", "firstName lastName profilePicture");
+    return prisma.review.findMany({
+      where: { targetUserId: userId },
+      orderBy: { createdAt: "desc" },
+      skip,
+      take: limit,
+      include: {
+        reviewer: { select: reviewerSelect },
+      },
+    });
   }
 
-  static countByTargetUserId(userId: Types.ObjectId | string) {
-    return ReviewModel.countDocuments({ targetUserId: userId });
+  static countByTargetUserId(userId: string) {
+    return prisma.review.count({ where: { targetUserId: userId } });
   }
 
-  static aggregateTargetUserStats(
-    targetUserId: Types.ObjectId | string,
-    session?: ClientSession,
-  ) {
-    return ReviewModel.aggregate([
-      {
-        $match: {
-          targetUserId: typeof targetUserId === "string"
-            ? new Types.ObjectId(targetUserId)
-            : targetUserId,
-        },
-      },
-      {
-        $group: {
-          _id: "$targetUserId",
-          averageRating: { $avg: "$rating" },
-          totalReviews: { $sum: 1 },
-        },
-      },
-    ]).session(session || null);
+  static async aggregateTargetUserStats(targetUserId: string, tx?: Tx) {
+    const result = await (tx ?? prisma).review.aggregate({
+      where: { targetUserId },
+      _avg: { rating: true },
+      _count: { _all: true },
+    });
+    return {
+      averageRating: result._avg.rating ?? 0,
+      totalReviews: result._count._all,
+    };
   }
 }

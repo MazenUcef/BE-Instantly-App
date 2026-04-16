@@ -1,7 +1,7 @@
 import { Server as SocketIOServer, Socket } from "socket.io";
 import jwt from "jsonwebtoken";
-import CallSessionModel from "../../modules/call/models/call.model";
-import JobSessionModel from "../../modules/session/models/session.model";
+import prisma from "./prisma";
+import { CallStatus, CallType, CallEndReason } from "@prisma/client";
 
 let io: SocketIOServer;
 
@@ -89,23 +89,23 @@ export const socketEvents = {
 const ACTIVE_CALL_STATUSES = ["initiated", "ringing", "accepted"];
 
 const canAccessSession = async (sessionId: string, userId: string) => {
-  const session = await JobSessionModel.findById(sessionId);
+  const session = await prisma.jobSession.findUnique({ where: { id: sessionId } });
   if (!session) {
-    return { ok: false, reason: "Session not found" };
+    return { ok: false, reason: "Session not found" } as const;
   }
 
   if (["completed", "cancelled"].includes(session.status)) {
-    return { ok: false, reason: "Session is not active" };
+    return { ok: false, reason: "Session is not active" } as const;
   }
 
-  const isCustomer = session.customerId.toString() === userId;
-  const isSupplier = session.supplierId.toString() === userId;
+  const isCustomer = session.customerId === userId;
+  const isSupplier = session.supplierId === userId;
 
   if (!isCustomer && !isSupplier) {
-    return { ok: false, reason: "Not allowed in this session" };
+    return { ok: false, reason: "Not allowed in this session" } as const;
   }
 
-  return { ok: true, session };
+  return { ok: true, session } as const;
 };
 
 export const initSocket = (server: any) => {
@@ -233,35 +233,39 @@ export const initSocket = (server: any) => {
           const session = validation.session;
 
           const receiverId =
-            session.customerId.toString() === user.userId
-              ? session.supplierId.toString()
-              : session.customerId.toString();
+            session.customerId === user.userId
+              ? session.supplierId
+              : session.customerId;
 
-          const existingActiveCall = await CallSessionModel.findOne({
-            sessionId,
-            status: { $in: ACTIVE_CALL_STATUSES },
+          const existingActiveCall = await prisma.callSession.findFirst({
+            where: {
+              sessionId,
+              status: { in: [CallStatus.initiated, CallStatus.ringing, CallStatus.accepted] },
+            },
           });
 
           if (existingActiveCall) {
             socket.emit(socketEvents.CALL_BUSY, {
               sessionId,
-              callId: existingActiveCall._id.toString(),
+              callId: existingActiveCall.id,
               message: "There is already an active call",
             });
             return;
           }
 
-          const call = await CallSessionModel.create({
-            sessionId,
-            callerId: user.userId,
-            receiverId,
-            type: "audio",
-            status: "ringing",
-            startedAt: new Date(),
+          const call = await prisma.callSession.create({
+            data: {
+              sessionId,
+              callerId: user.userId,
+              receiverId,
+              type: CallType.audio,
+              status: CallStatus.ringing,
+              startedAt: new Date(),
+            },
           });
 
           io.to(socketRooms.user(receiverId)).emit(socketEvents.CALL_INCOMING, {
-            callId: call._id.toString(),
+            callId: call.id,
             sessionId,
             callerId: user.userId,
             receiverId,
@@ -270,7 +274,7 @@ export const initSocket = (server: any) => {
           });
 
           io.to(socketRooms.user(user.userId)).emit(socketEvents.CALL_RINGING, {
-            callId: call._id.toString(),
+            callId: call.id,
             sessionId,
             receiverId,
             type: "audio",
@@ -292,7 +296,7 @@ export const initSocket = (server: any) => {
         try {
           if (!user?.userId || !callId || !sessionId) return;
 
-          const call = await CallSessionModel.findById(callId);
+          const call = await prisma.callSession.findUnique({ where: { id: callId } });
           if (!call) {
             socket.emit(socketEvents.CALL_ERROR, {
               sessionId,
@@ -302,7 +306,7 @@ export const initSocket = (server: any) => {
             return;
           }
 
-          if (call.receiverId.toString() !== user.userId) {
+          if (call.receiverId !== user.userId) {
             socket.emit(socketEvents.CALL_ERROR, {
               sessionId,
               callId,
@@ -311,7 +315,7 @@ export const initSocket = (server: any) => {
             return;
           }
 
-          if (!["initiated", "ringing"].includes(call.status)) {
+          if (call.status !== CallStatus.initiated && call.status !== CallStatus.ringing) {
             socket.emit(socketEvents.CALL_ERROR, {
               sessionId,
               callId,
@@ -320,11 +324,12 @@ export const initSocket = (server: any) => {
             return;
           }
 
-          call.status = "accepted";
-          call.answeredAt = new Date();
-          await call.save();
+          await prisma.callSession.update({
+            where: { id: callId },
+            data: { status: CallStatus.accepted, answeredAt: new Date() },
+          });
 
-          io.to(socketRooms.user(call.callerId.toString())).emit(
+          io.to(socketRooms.user(call.callerId)).emit(
             socketEvents.CALL_ACCEPTED,
             {
               callId,
@@ -334,7 +339,7 @@ export const initSocket = (server: any) => {
             },
           );
 
-          io.to(socketRooms.user(call.receiverId.toString())).emit(
+          io.to(socketRooms.user(call.receiverId)).emit(
             socketEvents.CALL_ACCEPTED,
             {
               callId,
@@ -360,7 +365,7 @@ export const initSocket = (server: any) => {
         try {
           if (!user?.userId || !callId || !sessionId) return;
 
-          const call = await CallSessionModel.findById(callId);
+          const call = await prisma.callSession.findUnique({ where: { id: callId } });
           if (!call) {
             socket.emit(socketEvents.CALL_ERROR, {
               sessionId,
@@ -370,7 +375,7 @@ export const initSocket = (server: any) => {
             return;
           }
 
-          if (call.receiverId.toString() !== user.userId) {
+          if (call.receiverId !== user.userId) {
             socket.emit(socketEvents.CALL_ERROR, {
               sessionId,
               callId,
@@ -379,7 +384,7 @@ export const initSocket = (server: any) => {
             return;
           }
 
-          if (!["initiated", "ringing"].includes(call.status)) {
+          if (call.status !== CallStatus.initiated && call.status !== CallStatus.ringing) {
             socket.emit(socketEvents.CALL_ERROR, {
               sessionId,
               callId,
@@ -388,12 +393,16 @@ export const initSocket = (server: any) => {
             return;
           }
 
-          call.status = "declined";
-          call.endedAt = new Date();
-          call.endReason = "declined";
-          await call.save();
+          await prisma.callSession.update({
+            where: { id: callId },
+            data: {
+              status: CallStatus.declined,
+              endedAt: new Date(),
+              endReason: CallEndReason.declined,
+            },
+          });
 
-          io.to(socketRooms.user(call.callerId.toString())).emit(
+          io.to(socketRooms.user(call.callerId)).emit(
             socketEvents.CALL_DECLINED,
             {
               callId,
@@ -403,7 +412,7 @@ export const initSocket = (server: any) => {
             },
           );
 
-          io.to(socketRooms.user(call.receiverId.toString())).emit(
+          io.to(socketRooms.user(call.receiverId)).emit(
             socketEvents.CALL_DECLINED,
             {
               callId,
@@ -429,7 +438,7 @@ export const initSocket = (server: any) => {
         try {
           if (!user?.userId || !callId || !sessionId) return;
 
-          const call = await CallSessionModel.findById(callId);
+          const call = await prisma.callSession.findUnique({ where: { id: callId } });
           if (!call) {
             socket.emit(socketEvents.CALL_ERROR, {
               sessionId,
@@ -439,8 +448,8 @@ export const initSocket = (server: any) => {
             return;
           }
 
-          const isCaller = call.callerId.toString() === user.userId;
-          const isReceiver = call.receiverId.toString() === user.userId;
+          const isCaller = call.callerId === user.userId;
+          const isReceiver = call.receiverId === user.userId;
 
           if (!isCaller && !isReceiver) {
             socket.emit(socketEvents.CALL_ERROR, {
@@ -451,16 +460,26 @@ export const initSocket = (server: any) => {
             return;
           }
 
-          if (["ended", "declined", "missed", "failed"].includes(call.status)) {
+          const finished: CallStatus[] = [
+            CallStatus.ended,
+            CallStatus.declined,
+            CallStatus.missed,
+            CallStatus.failed,
+          ];
+          if (finished.includes(call.status)) {
             return;
           }
 
-          call.status = "ended";
-          call.endedAt = new Date();
-          call.endReason = isCaller ? "caller_ended" : "receiver_ended";
-          await call.save();
+          await prisma.callSession.update({
+            where: { id: callId },
+            data: {
+              status: CallStatus.ended,
+              endedAt: new Date(),
+              endReason: isCaller ? CallEndReason.caller_ended : CallEndReason.receiver_ended,
+            },
+          });
 
-          io.to(socketRooms.user(call.callerId.toString())).emit(
+          io.to(socketRooms.user(call.callerId)).emit(
             socketEvents.CALL_ENDED,
             {
               callId,
@@ -470,7 +489,7 @@ export const initSocket = (server: any) => {
             },
           );
 
-          io.to(socketRooms.user(call.receiverId.toString())).emit(
+          io.to(socketRooms.user(call.receiverId)).emit(
             socketEvents.CALL_ENDED,
             {
               callId,
@@ -504,7 +523,7 @@ export const initSocket = (server: any) => {
         try {
           if (!user?.userId || !callId || !sessionId || !sdp) return;
 
-          const call = await CallSessionModel.findById(callId);
+          const call = await prisma.callSession.findUnique({ where: { id: callId } });
           if (!call) {
             socket.emit(socketEvents.CALL_ERROR, {
               sessionId,
@@ -514,8 +533,8 @@ export const initSocket = (server: any) => {
             return;
           }
 
-          const isCaller = call.callerId.toString() === user.userId;
-          const isReceiver = call.receiverId.toString() === user.userId;
+          const isCaller = call.callerId === user.userId;
+          const isReceiver = call.receiverId === user.userId;
 
           if (!isCaller && !isReceiver) {
             socket.emit(socketEvents.CALL_ERROR, {
@@ -526,9 +545,7 @@ export const initSocket = (server: any) => {
             return;
           }
 
-          const targetUserId = isCaller
-            ? call.receiverId.toString()
-            : call.callerId.toString();
+          const targetUserId = isCaller ? call.receiverId : call.callerId;
 
           io.to(socketRooms.user(targetUserId)).emit(socketEvents.CALL_OFFER, {
             callId,
@@ -561,7 +578,7 @@ export const initSocket = (server: any) => {
         try {
           if (!user?.userId || !callId || !sessionId || !sdp) return;
 
-          const call = await CallSessionModel.findById(callId);
+          const call = await prisma.callSession.findUnique({ where: { id: callId } });
           if (!call) {
             socket.emit(socketEvents.CALL_ERROR, {
               sessionId,
@@ -571,8 +588,8 @@ export const initSocket = (server: any) => {
             return;
           }
 
-          const isCaller = call.callerId.toString() === user.userId;
-          const isReceiver = call.receiverId.toString() === user.userId;
+          const isCaller = call.callerId === user.userId;
+          const isReceiver = call.receiverId === user.userId;
 
           if (!isCaller && !isReceiver) {
             socket.emit(socketEvents.CALL_ERROR, {
@@ -583,9 +600,7 @@ export const initSocket = (server: any) => {
             return;
           }
 
-          const targetUserId = isCaller
-            ? call.receiverId.toString()
-            : call.callerId.toString();
+          const targetUserId = isCaller ? call.receiverId : call.callerId;
 
           io.to(socketRooms.user(targetUserId)).emit(socketEvents.CALL_ANSWER, {
             callId,
@@ -618,7 +633,7 @@ export const initSocket = (server: any) => {
         try {
           if (!user?.userId || !callId || !sessionId || !candidate) return;
 
-          const call = await CallSessionModel.findById(callId);
+          const call = await prisma.callSession.findUnique({ where: { id: callId } });
           if (!call) {
             socket.emit(socketEvents.CALL_ERROR, {
               sessionId,
@@ -628,8 +643,8 @@ export const initSocket = (server: any) => {
             return;
           }
 
-          const isCaller = call.callerId.toString() === user.userId;
-          const isReceiver = call.receiverId.toString() === user.userId;
+          const isCaller = call.callerId === user.userId;
+          const isReceiver = call.receiverId === user.userId;
 
           if (!isCaller && !isReceiver) {
             socket.emit(socketEvents.CALL_ERROR, {
@@ -640,9 +655,7 @@ export const initSocket = (server: any) => {
             return;
           }
 
-          const targetUserId = isCaller
-            ? call.receiverId.toString()
-            : call.callerId.toString();
+          const targetUserId = isCaller ? call.receiverId : call.callerId;
 
           io.to(socketRooms.user(targetUserId)).emit(
             socketEvents.CALL_ICE_CANDIDATE,

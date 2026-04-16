@@ -22,10 +22,7 @@ export const getSessionById = async (req: any, res: Response) => {
 };
 
 export const getActiveSessionForUser = async (req: any, res: Response) => {
-  const result = await SessionService.getActiveSessionForUser({
-    requestedUserId: req.params.userId,
-    actorUserId: req.user.userId,
-  });
+  const result = await SessionService.getActiveSessionForUser(req.user.userId);
 
   return res.status(200).json(result);
 };

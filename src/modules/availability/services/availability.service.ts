@@ -1,11 +1,18 @@
-import UserModel from "../../auth/models/User.model";
-import bundleBookingModel from "../../bundleBooking/models/bundleBooking.model";
-import orderModel from "../../order/models/Order.model";
-import offerModel from "../../offer/models/Offer.model";
+import prisma from "../../../shared/config/prisma";
+import {
+  BundleBookingStatus,
+  OfferStatus,
+  OrderStatus,
+  UserRole,
+} from "@prisma/client";
 import { AppError } from "../../../shared/middlewares/errorHandler";
 import { ACTIVE_BOOKING_STATUSES } from "../../../shared/constants/availability.constants";
 
 type DayStatus = "available" | "has_bookings";
+
+const ACTIVE_BOOKING_ENUM = ACTIVE_BOOKING_STATUSES.map(
+  (s) => s as BundleBookingStatus,
+);
 
 const getDateOnly = (date: Date | string) => {
   const d = new Date(date);
@@ -18,15 +25,23 @@ const minutesToTime = (totalMinutes: number) => {
   return `${h}:${m}`;
 };
 
+const customerSelect = {
+  id: true,
+  firstName: true,
+  lastName: true,
+  email: true,
+  phoneNumber: true,
+  profilePicture: true,
+  address: true,
+} as const;
+const taxonomySelect = { id: true, name: true, nameAr: true } as const;
+
 export class AvailabilityService {
-  static async getSupplierCalendar(input: {
-    supplierId: string;
-    month: string; // "YYYY-MM"
-  }) {
+  static async getSupplierCalendar(input: { supplierId: string; month: string }) {
     const { supplierId, month } = input;
 
-    const supplier = await UserModel.findById(supplierId);
-    if (!supplier || supplier.role !== "supplier") {
+    const supplier = await prisma.user.findUnique({ where: { id: supplierId } });
+    if (!supplier || supplier.role !== UserRole.supplier) {
       throw new AppError("Supplier not found", 404);
     }
 
@@ -41,45 +56,43 @@ export class AvailabilityService {
     );
 
     const [bookings, scheduledOrders] = await Promise.all([
-      bundleBookingModel
-        .find({
+      prisma.bundleBooking.findMany({
+        where: {
           supplierId,
           bookedDate: {
-            $gte: month + "-01",
-            $lte: month + "-" + String(daysInMonth).padStart(2, "0"),
+            gte: month + "-01",
+            lte: month + "-" + String(daysInMonth).padStart(2, "0"),
           },
-          status: { $in: [...ACTIVE_BOOKING_STATUSES] },
-        })
-        .lean(),
-      orderModel
-        .find({
+          status: { in: ACTIVE_BOOKING_ENUM },
+        },
+      }),
+      prisma.order.findMany({
+        where: {
           supplierId,
-          status: { $in: ["scheduled", "in_progress"] },
-          scheduledAt: { $lte: monthEnd },
-        })
-        .populate("customerId", "firstName lastName email phoneNumber profilePicture address")
-        .populate("categoryId", "name nameAr")
-        .populate("governmentId", "name nameAr")
-        .lean(),
+          status: { in: [OrderStatus.scheduled, OrderStatus.in_progress] },
+          scheduledAt: { lte: monthEnd },
+        },
+        include: {
+          customer: { select: customerSelect },
+          category: { select: { id: true, name: true } },
+          government: { select: taxonomySelect },
+        },
+      }),
     ]);
 
-    const orderIds = scheduledOrders.map((o) => o._id);
+    const orderIds = scheduledOrders.map((o) => o.id);
     const acceptedOffers = orderIds.length
-      ? await offerModel
-          .find({ orderId: { $in: orderIds }, status: "accepted" })
-          .lean()
+      ? await prisma.offer.findMany({
+          where: { orderId: { in: orderIds }, status: OfferStatus.accepted },
+        })
       : [];
     const offerByOrderId = new Map<string, any>();
-    for (const off of acceptedOffers) {
-      offerByOrderId.set(String(off.orderId), off);
-    }
+    for (const off of acceptedOffers) offerByOrderId.set(off.orderId, off);
 
     const busyDates = new Set<string>();
     const ordersByDate: Record<string, any[]> = {};
 
-    for (const booking of bookings) {
-      busyDates.add(String(booking.bookedDate));
-    }
+    for (const booking of bookings) busyDates.add(booking.bookedDate);
 
     for (const order of scheduledOrders) {
       if (!order.scheduledAt) continue;
@@ -87,7 +100,7 @@ export class AvailabilityService {
       const start = new Date(order.scheduledAt);
       const orderWithOffer = {
         ...order,
-        offer: offerByOrderId.get(String(order._id)) || null,
+        offer: offerByOrderId.get(order.id) || null,
       };
       for (let i = 0; i < days; i++) {
         const d = new Date(start);
@@ -101,64 +114,54 @@ export class AvailabilityService {
     }
 
     const days: Record<string, DayStatus> = {};
-
     for (let day = 1; day <= daysInMonth; day++) {
       const dateStr = `${month}-${String(day).padStart(2, "0")}`;
       days[dateStr] = busyDates.has(dateStr) ? "has_bookings" : "available";
     }
 
-    return {
-      success: true,
-      month,
-      days,
-      ordersByDate,
-    };
+    return { success: true, month, days, ordersByDate };
   }
 
-  static async getSupplierBookedTimes(input: {
-    supplierId: string;
-    date: string;
-  }) {
+  static async getSupplierBookedTimes(input: { supplierId: string; date: string }) {
     const { supplierId, date } = input;
 
-    const supplier = await UserModel.findById(supplierId);
-    if (!supplier || supplier.role !== "supplier") {
+    const supplier = await prisma.user.findUnique({ where: { id: supplierId } });
+    if (!supplier || supplier.role !== UserRole.supplier) {
       throw new AppError("Supplier not found", 404);
     }
 
-    const dayStart = new Date(date + "T00:00:00.000Z");
     const dayEnd = new Date(date + "T23:59:59.999Z");
 
     const [bookings, scheduledOrders] = await Promise.all([
-      bundleBookingModel
-        .find({
+      prisma.bundleBooking.findMany({
+        where: {
           supplierId,
           bookedDate: date,
-          status: { $in: [...ACTIVE_BOOKING_STATUSES] },
-        })
-        .lean(),
-      orderModel
-        .find({
+          status: { in: ACTIVE_BOOKING_ENUM },
+        },
+      }),
+      prisma.order.findMany({
+        where: {
           supplierId,
-          status: { $in: ["scheduled", "in_progress"] },
-          scheduledAt: { $lte: dayEnd },
-        })
-        .populate("customerId", "firstName lastName email phoneNumber profilePicture address")
-        .populate("categoryId", "name nameAr")
-        .populate("governmentId", "name nameAr")
-        .lean(),
+          status: { in: [OrderStatus.scheduled, OrderStatus.in_progress] },
+          scheduledAt: { lte: dayEnd },
+        },
+        include: {
+          customer: { select: customerSelect },
+          category: { select: { id: true, name: true } },
+          government: { select: taxonomySelect },
+        },
+      }),
     ]);
 
-    const orderIds = scheduledOrders.map((o) => o._id);
+    const orderIds = scheduledOrders.map((o) => o.id);
     const acceptedOffers = orderIds.length
-      ? await offerModel
-          .find({ orderId: { $in: orderIds }, status: "accepted" })
-          .lean()
+      ? await prisma.offer.findMany({
+          where: { orderId: { in: orderIds }, status: OfferStatus.accepted },
+        })
       : [];
     const offerByOrderId = new Map<string, any>();
-    for (const off of acceptedOffers) {
-      offerByOrderId.set(String(off.orderId), off);
-    }
+    for (const off of acceptedOffers) offerByOrderId.set(off.orderId, off);
 
     const bookedTimes: {
       start: string;
@@ -177,8 +180,8 @@ export class AvailabilityService {
       });
     }
 
-    const DEFAULT_DAY_START_MINUTES = 9 * 60; // 09:00
-    const DEFAULT_DAY_END_MINUTES = 17 * 60; // 17:00
+    const DEFAULT_DAY_START_MINUTES = 9 * 60;
+    const DEFAULT_DAY_END_MINUTES = 17 * 60;
 
     for (const order of scheduledOrders) {
       if (!order.scheduledAt) continue;
@@ -204,17 +207,13 @@ export class AvailabilityService {
         type: "order",
         order: {
           ...order,
-          offer: offerByOrderId.get(String(order._id)) || null,
+          offer: offerByOrderId.get(order.id) || null,
         },
       });
     }
 
     bookedTimes.sort((a, b) => a.start.localeCompare(b.start));
 
-    return {
-      success: true,
-      date,
-      bookedTimes,
-    };
+    return { success: true, date, bookedTimes };
   }
 }

@@ -1,103 +1,106 @@
-import { ClientSession, Types } from "mongoose";
-import { OFFER_STATUS } from "../../../shared/constants/offer.constants";
-import offerModel from "../models/Offer.model";
+import { OfferStatus, Prisma } from "@prisma/client";
+import prisma from "../../../shared/config/prisma";
+
+type Tx = Prisma.TransactionClient;
+
+const HISTORY_STATUSES: OfferStatus[] = [
+  OfferStatus.accepted,
+  OfferStatus.completed,
+  OfferStatus.withdrawn,
+];
 
 export class OfferRepository {
   static createOffer(
     data: {
-      orderId: Types.ObjectId | string;
-      supplierId: Types.ObjectId | string;
+      orderId: string;
+      supplierId: string;
       amount: number;
       estimatedDuration?: number | null;
       expectedDays?: number | null;
       timeToStart?: Date | string | null;
       expiresAt?: Date | null;
-      status?: string;
+      status?: OfferStatus;
     },
-    session?: ClientSession,
+    tx?: Tx,
   ) {
-    return offerModel.create([data], { session }).then((docs) => docs[0]);
-  }
-
-  static findById(offerId: Types.ObjectId | string, session?: ClientSession) {
-    return offerModel.findById(offerId).session(session || null);
-  }
-
-  static findPendingOfferBySupplierAndOrder(
-    supplierId: Types.ObjectId | string,
-    orderId: Types.ObjectId | string,
-    session?: ClientSession,
-  ) {
-    return offerModel.findOne({
-      supplierId,
-      orderId,
-      status: OFFER_STATUS.PENDING,
-    }).session(session || null);
-  }
-
-  static findAcceptedOfferBySupplier(
-    supplierId: Types.ObjectId | string,
-    session?: ClientSession,
-  ) {
-    return offerModel.findOne({
-      supplierId,
-      status: OFFER_STATUS.ACCEPTED,
-    })
-      .sort({ createdAt: -1 })
-      .session(session || null);
-  }
-
-  static findPendingOffersBySupplier(
-    supplierId: Types.ObjectId | string,
-    session?: ClientSession,
-  ) {
-    return offerModel.find({
-      supplierId,
-      status: OFFER_STATUS.PENDING,
-    })
-      .sort({ createdAt: -1 })
-      .session(session || null);
-  }
-
-  static countPendingOffersBySupplier(supplierId: Types.ObjectId | string) {
-    return offerModel.countDocuments({
-      supplierId,
-      status: OFFER_STATUS.PENDING,
+    return (tx ?? prisma).offer.create({
+      data: {
+        orderId: data.orderId,
+        supplierId: data.supplierId,
+        amount: new Prisma.Decimal(data.amount),
+        estimatedDuration: data.estimatedDuration ?? null,
+        expectedDays: data.expectedDays ?? null,
+        timeToStart: data.timeToStart ? new Date(data.timeToStart) : null,
+        expiresAt: data.expiresAt ?? null,
+        status: data.status ?? OfferStatus.pending,
+      },
     });
   }
 
-  static findPendingOffersByOrder(
-    orderId: Types.ObjectId | string,
-    session?: ClientSession,
+  static findById(offerId: string, tx?: Tx) {
+    return (tx ?? prisma).offer.findUnique({ where: { id: offerId } });
+  }
+
+  static findPendingOfferBySupplierAndOrder(
+    supplierId: string,
+    orderId: string,
+    tx?: Tx,
   ) {
-    return offerModel.find({
-      orderId,
-      status: OFFER_STATUS.PENDING,
-    })
-      .sort({ createdAt: -1 })
-      .session(session || null);
+    return (tx ?? prisma).offer.findFirst({
+      where: { supplierId, orderId, status: OfferStatus.pending },
+    });
   }
 
-  static findOrderOffers(orderId: Types.ObjectId | string) {
-    return offerModel.find({
-      orderId,
-      status: { $in: [OFFER_STATUS.PENDING, OFFER_STATUS.ACCEPTED] },
-    }).sort({ createdAt: -1 });
+  static findAcceptedOfferBySupplier(supplierId: string, tx?: Tx) {
+    return (tx ?? prisma).offer.findFirst({
+      where: { supplierId, status: OfferStatus.accepted },
+      orderBy: { createdAt: "desc" },
+    });
   }
 
-  static findSupplierOfferForOrder(
-    orderId: Types.ObjectId | string,
-    supplierId: Types.ObjectId | string,
-  ) {
-    return offerModel.find({
-      orderId,
-      supplierId,
-      status: { $in: [OFFER_STATUS.PENDING, OFFER_STATUS.ACCEPTED] },
-    }).sort({ createdAt: -1 });
+  static findPendingOffersBySupplier(supplierId: string, tx?: Tx) {
+    return (tx ?? prisma).offer.findMany({
+      where: { supplierId, status: OfferStatus.pending },
+      orderBy: { createdAt: "desc" },
+    });
   }
 
-  static updatePendingOffer(
-    offerId: Types.ObjectId | string,
+  static countPendingOffersBySupplier(supplierId: string) {
+    return prisma.offer.count({
+      where: { supplierId, status: OfferStatus.pending },
+    });
+  }
+
+  static findPendingOffersByOrder(orderId: string, tx?: Tx) {
+    return (tx ?? prisma).offer.findMany({
+      where: { orderId, status: OfferStatus.pending },
+      orderBy: { createdAt: "desc" },
+    });
+  }
+
+  static findOrderOffers(orderId: string) {
+    return prisma.offer.findMany({
+      where: {
+        orderId,
+        status: { in: [OfferStatus.pending, OfferStatus.accepted] },
+      },
+      orderBy: { createdAt: "desc" },
+    });
+  }
+
+  static findSupplierOfferForOrder(orderId: string, supplierId: string) {
+    return prisma.offer.findMany({
+      where: {
+        orderId,
+        supplierId,
+        status: { in: [OfferStatus.pending, OfferStatus.accepted] },
+      },
+      orderBy: { createdAt: "desc" },
+    });
+  }
+
+  static async updatePendingOffer(
+    offerId: string,
     data: {
       amount: number;
       estimatedDuration?: number | null;
@@ -105,229 +108,173 @@ export class OfferRepository {
       timeToStart?: Date | string | null;
       expiresAt?: Date | null;
     },
-    session?: ClientSession,
+    tx?: Tx,
   ) {
-    return offerModel.findOneAndUpdate(
-      { _id: offerId, status: OFFER_STATUS.PENDING },
-      {
-        $set: {
-          amount: data.amount,
-          estimatedDuration: data.estimatedDuration ?? null,
-          expectedDays: data.expectedDays ?? null,
-          timeToStart: data.timeToStart ?? null,
-          expiresAt: data.expiresAt ?? null,
-        },
+    const client = tx ?? prisma;
+    const res = await client.offer.updateMany({
+      where: { id: offerId, status: OfferStatus.pending },
+      data: {
+        amount: new Prisma.Decimal(data.amount),
+        estimatedDuration: data.estimatedDuration ?? null,
+        expectedDays: data.expectedDays ?? null,
+        timeToStart: data.timeToStart ? new Date(data.timeToStart) : null,
+        expiresAt: data.expiresAt ?? null,
       },
-      { new: true, session },
-    );
+    });
+    if (res.count === 0) return null;
+    return client.offer.findUnique({ where: { id: offerId } });
   }
 
   static findSupplierScheduledWindows(
-    supplierId: Types.ObjectId | string,
-    excludeOfferId?: Types.ObjectId | string,
-    session?: ClientSession,
+    supplierId: string,
+    excludeOfferId?: string,
+    tx?: Tx,
   ) {
-    const filter: any = {
-      supplierId,
-      status: OFFER_STATUS.ACCEPTED,
-      timeToStart: { $ne: null },
-      estimatedDuration: { $ne: null },
-    };
-    if (excludeOfferId) {
-      filter._id = { $ne: excludeOfferId };
-    }
-    return offerModel.find(filter).select("timeToStart estimatedDuration").session(session || null);
+    return (tx ?? prisma).offer.findMany({
+      where: {
+        supplierId,
+        status: OfferStatus.accepted,
+        timeToStart: { not: null },
+        estimatedDuration: { not: null },
+        ...(excludeOfferId ? { NOT: { id: excludeOfferId } } : {}),
+      },
+      select: { id: true, timeToStart: true, estimatedDuration: true },
+    });
   }
 
-  static acceptPendingOffer(
-    offerId: Types.ObjectId | string,
-    session?: ClientSession,
-  ) {
-    return offerModel.findOneAndUpdate(
-      { _id: offerId, status: OFFER_STATUS.PENDING },
-      {
-        $set: {
-          status: OFFER_STATUS.ACCEPTED,
-          acceptedAt: new Date(),
-        },
-      },
-      { new: true, session },
-    );
+  static async acceptPendingOffer(offerId: string, tx?: Tx) {
+    const client = tx ?? prisma;
+    const res = await client.offer.updateMany({
+      where: { id: offerId, status: OfferStatus.pending },
+      data: { status: OfferStatus.accepted, acceptedAt: new Date() },
+    });
+    if (res.count === 0) return null;
+    return client.offer.findUnique({ where: { id: offerId } });
   }
 
-  static rejectPendingOffer(
-    offerId: Types.ObjectId | string,
-    session?: ClientSession,
-  ) {
-    return offerModel.findOneAndUpdate(
-      { _id: offerId, status: OFFER_STATUS.PENDING },
-      {
-        $set: {
-          status: OFFER_STATUS.REJECTED,
-          rejectedAt: new Date(),
-        },
-      },
-      { new: true, session },
-    );
+  static async rejectPendingOffer(offerId: string, tx?: Tx) {
+    const client = tx ?? prisma;
+    const res = await client.offer.updateMany({
+      where: { id: offerId, status: OfferStatus.pending },
+      data: { status: OfferStatus.rejected, rejectedAt: new Date() },
+    });
+    if (res.count === 0) return null;
+    return client.offer.findUnique({ where: { id: offerId } });
   }
 
   static rejectOtherOffersForOrder(
-    orderId: Types.ObjectId | string,
-    acceptedOfferId: Types.ObjectId | string,
-    session?: ClientSession,
+    orderId: string,
+    acceptedOfferId: string,
+    tx?: Tx,
   ) {
-    return offerModel.updateMany(
-      {
+    return (tx ?? prisma).offer.updateMany({
+      where: {
         orderId,
-        _id: { $ne: acceptedOfferId },
-        status: OFFER_STATUS.PENDING,
+        NOT: { id: acceptedOfferId },
+        status: OfferStatus.pending,
       },
-      {
-        $set: {
-          status: OFFER_STATUS.REJECTED,
-          rejectedAt: new Date(),
-        },
-      },
-      { session },
-    );
+      data: { status: OfferStatus.rejected, rejectedAt: new Date() },
+    });
   }
 
   static rejectOtherPendingOffersForSupplier(
-    supplierId: Types.ObjectId | string,
-    acceptedOfferId: Types.ObjectId | string,
-    session?: ClientSession,
+    supplierId: string,
+    acceptedOfferId: string,
+    tx?: Tx,
   ) {
-    return offerModel.updateMany(
-      {
+    return (tx ?? prisma).offer.updateMany({
+      where: {
         supplierId,
-        _id: { $ne: acceptedOfferId },
-        status: OFFER_STATUS.PENDING,
+        NOT: { id: acceptedOfferId },
+        status: OfferStatus.pending,
       },
-      {
-        $set: {
-          status: OFFER_STATUS.REJECTED,
-          rejectedAt: new Date(),
-        },
-      },
-      { session },
-    );
+      data: { status: OfferStatus.rejected, rejectedAt: new Date() },
+    });
   }
 
   static findSupplierOtherPendingOffers(
-    supplierId: Types.ObjectId | string,
-    excludeOfferId: Types.ObjectId | string,
-    session?: ClientSession,
+    supplierId: string,
+    excludeOfferId: string,
+    tx?: Tx,
   ) {
-    return offerModel.find({
-      supplierId,
-      status: OFFER_STATUS.PENDING,
-      _id: { $ne: excludeOfferId },
-    }).session(session || null);
-  }
-
-  static withdrawPendingOfferBySupplier(
-    offerId: Types.ObjectId | string,
-    supplierId: Types.ObjectId | string,
-    session?: ClientSession,
-  ) {
-    return offerModel.findOneAndUpdate(
-      {
-        _id: offerId,
+    return (tx ?? prisma).offer.findMany({
+      where: {
         supplierId,
-        status: OFFER_STATUS.PENDING,
-      },
-      {
-        $set: {
-          status: OFFER_STATUS.WITHDRAWN,
-          withdrawnAt: new Date(),
-        },
-      },
-      { new: true, session },
-    );
-  }
-
-  static withdrawAcceptedOfferBySupplier(
-    offerId: Types.ObjectId | string,
-    supplierId: Types.ObjectId | string,
-    session?: ClientSession,
-  ) {
-    return offerModel.findOneAndUpdate(
-      {
-        _id: offerId,
-        supplierId,
-        status: OFFER_STATUS.ACCEPTED,
-      },
-      {
-        $set: {
-          status: OFFER_STATUS.WITHDRAWN,
-          withdrawnAt: new Date(),
-        },
-      },
-      { new: true, session },
-    );
-  }
-
-  static markCompleted(
-    offerId: Types.ObjectId | string,
-    session?: ClientSession,
-  ) {
-    return offerModel.findOneAndUpdate(
-      {
-        _id: offerId,
-        status: OFFER_STATUS.ACCEPTED,
-      },
-      {
-        $set: {
-          status: OFFER_STATUS.COMPLETED,
-          completedAt: new Date(),
-        },
-      },
-      { new: true, session },
-    );
-  }
-
-  static findSupplierAcceptedOffersHistory(
-    supplierId: Types.ObjectId | string,
-    page = 1,
-    limit = 20,
-  ) {
-    const skip = (page - 1) * limit;
-
-    return offerModel.find({
-      supplierId,
-      status: {
-        $in: [OFFER_STATUS.ACCEPTED, OFFER_STATUS.COMPLETED, OFFER_STATUS.WITHDRAWN],
-      },
-    })
-      .sort({ createdAt: -1 })
-      .skip(skip)
-      .limit(limit);
-  }
-
-  static countSupplierAcceptedOffersHistory(
-    supplierId: Types.ObjectId | string,
-  ) {
-    return offerModel.countDocuments({
-      supplierId,
-      status: {
-        $in: [OFFER_STATUS.ACCEPTED, OFFER_STATUS.COMPLETED, OFFER_STATUS.WITHDRAWN],
+        status: OfferStatus.pending,
+        NOT: { id: excludeOfferId },
       },
     });
   }
 
-  static findSupplierPendingOffersPaginated(
-    supplierId: Types.ObjectId | string,
+  static async withdrawPendingOfferBySupplier(
+    offerId: string,
+    supplierId: string,
+    reason: string,
+    tx?: Tx,
+  ) {
+    const client = tx ?? prisma;
+    const res = await client.offer.updateMany({
+      where: { id: offerId, supplierId, status: OfferStatus.pending },
+      data: { status: OfferStatus.withdrawn, withdrawnAt: new Date(), withdrawnReason: reason },
+    });
+    if (res.count === 0) return null;
+    return client.offer.findUnique({ where: { id: offerId } });
+  }
+
+  static async withdrawAcceptedOfferBySupplier(
+    offerId: string,
+    supplierId: string,
+    reason: string,
+    tx?: Tx,
+  ) {
+    const client = tx ?? prisma;
+    const res = await client.offer.updateMany({
+      where: { id: offerId, supplierId, status: OfferStatus.accepted },
+      data: { status: OfferStatus.withdrawn, withdrawnAt: new Date(), withdrawnReason: reason },
+    });
+    if (res.count === 0) return null;
+    return client.offer.findUnique({ where: { id: offerId } });
+  }
+
+  static async markCompleted(offerId: string, tx?: Tx) {
+    const client = tx ?? prisma;
+    const res = await client.offer.updateMany({
+      where: { id: offerId, status: OfferStatus.accepted },
+      data: { status: OfferStatus.completed, completedAt: new Date() },
+    });
+    if (res.count === 0) return null;
+    return client.offer.findUnique({ where: { id: offerId } });
+  }
+
+  static findSupplierAcceptedOffersHistory(
+    supplierId: string,
     page = 1,
     limit = 20,
   ) {
-    const skip = (page - 1) * limit;
+    return prisma.offer.findMany({
+      where: { supplierId, status: { in: HISTORY_STATUSES } },
+      orderBy: { createdAt: "desc" },
+      skip: (page - 1) * limit,
+      take: limit,
+    });
+  }
 
-    return offerModel.find({
-      supplierId,
-      status: OFFER_STATUS.PENDING,
-    })
-      .sort({ createdAt: -1 })
-      .skip(skip)
-      .limit(limit);
+  static countSupplierAcceptedOffersHistory(supplierId: string) {
+    return prisma.offer.count({
+      where: { supplierId, status: { in: HISTORY_STATUSES } },
+    });
+  }
+
+  static findSupplierPendingOffersPaginated(
+    supplierId: string,
+    page = 1,
+    limit = 20,
+  ) {
+    return prisma.offer.findMany({
+      where: { supplierId, status: OfferStatus.pending },
+      orderBy: { createdAt: "desc" },
+      skip: (page - 1) * limit,
+      take: limit,
+    });
   }
 }

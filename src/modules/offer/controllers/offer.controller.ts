@@ -36,6 +36,7 @@ export const deleteOffer = async (req: any, res: Response) => {
   const result = await OfferService.deleteOffer({
     offerId: req.params.id,
     supplierId: req.user.userId,
+    reason: req.body.reason,
   });
 
   return res.status(200).json(result);

@@ -1,12 +1,11 @@
-import mongoose from "mongoose";
+import prisma from "../../../shared/config/prisma";
+import { OrderStatus, BundleBookingStatus } from "@prisma/client";
 import { AppError } from "../../../shared/middlewares/errorHandler";
 import { ReviewRepository } from "../repositories/review.repository";
-import ReviewModel from "../models/review.model";
-import OrderModel from "../../order/models/Order.model";
-import BundleBookingModel from "../../bundleBooking/models/bundleBooking.model";
-import SessionModel from "../../session/models/session.model";
-import UserModel from "../../auth/models/User.model";
-import { REVIEW_NOTIFICATION_TYPES, REVIEW_ROLES } from "../../../shared/constants/review.constants";
+import {
+  REVIEW_NOTIFICATION_TYPES,
+  REVIEW_ROLES,
+} from "../../../shared/constants/review.constants";
 import { publishNotification } from "../../notification/notification.publisher";
 
 export class ReviewService {
@@ -23,154 +22,151 @@ export class ReviewService {
     if (!orderId && !bundleBookingId) {
       throw new AppError("Either orderId or bundleBookingId is required", 400);
     }
-
-    const dbSession = await mongoose.startSession();
-
-    let createdReview: any = null;
-    let targetUserId: string = "";
-    let reviewerName = "Someone";
-    let averageRating = 0;
-    let totalReviews = 0;
-    let customerId: string | null = null;
-    let supplierId: string | null = null;
-    let bothReviewed = false;
-    const referenceId = orderId || bundleBookingId!;
-
-    try {
-      await dbSession.withTransaction(async () => {
-        if (![REVIEW_ROLES.CUSTOMER, REVIEW_ROLES.SUPPLIER].includes(role as any)) {
-          throw new AppError("Invalid review role", 400);
-        }
-
-        let reviewSource: any = null;
-        let session: any = null;
-
-        if (orderId) {
-          const order = await OrderModel.findById(orderId).session(dbSession);
-          if (!order) throw new AppError("Order not found", 404);
-          session = await SessionModel.findOne({ orderId }).session(dbSession);
-          if (!session) throw new AppError("Session not found for this order", 404);
-          if (order.status !== "completed") {
-            throw new AppError("Reviews can only be submitted after completion", 400);
-          }
-          customerId = order.customerId.toString();
-          supplierId = session.supplierId.toString();
-          reviewSource = order;
-        } else {
-          const booking = await BundleBookingModel.findById(bundleBookingId).session(dbSession);
-          if (!booking) throw new AppError("Booking not found", 404);
-          session = await SessionModel.findOne({ bundleBookingId }).session(dbSession);
-          if (!session) throw new AppError("Session not found for this booking", 404);
-          if (booking.status !== "completed") {
-            throw new AppError("Reviews can only be submitted after completion", 400);
-          }
-          customerId = booking.customerId.toString();
-          supplierId = booking.supplierId.toString();
-          reviewSource = booking;
-        }
-
-        const isCustomerReviewer = role === REVIEW_ROLES.CUSTOMER;
-        const isSupplierReviewer = role === REVIEW_ROLES.SUPPLIER;
-
-        if (isCustomerReviewer && actorUserId !== customerId) {
-          throw new AppError("Only the customer can submit a customer review", 403);
-        }
-
-        if (isSupplierReviewer && actorUserId !== supplierId) {
-          throw new AppError("Only the supplier can submit a supplier review", 403);
-        }
-
-        if (isCustomerReviewer && reviewSource.customerReviewed) {
-          throw new AppError("Customer has already reviewed", 400);
-        }
-
-        if (isSupplierReviewer && reviewSource.supplierReviewed) {
-          throw new AppError("Supplier has already reviewed", 400);
-        }
-
-        targetUserId = isCustomerReviewer ? supplierId! : customerId!;
-
-        if (actorUserId === targetUserId) {
-          throw new AppError("You cannot review yourself", 400);
-        }
-
-        const existingReview = await ReviewRepository.findByReviewerAndOrder(
-          actorUserId,
-          referenceId,
-          dbSession,
-        );
-
-        if (existingReview) {
-          throw new AppError("You have already submitted a review", 400);
-        }
-
-        createdReview = await ReviewRepository.create(
-          {
-            reviewerId: actorUserId,
-            targetUserId,
-            orderId: orderId || referenceId,
-            sessionId: session._id,
-            rating,
-            comment,
-          },
-          dbSession,
-        );
-
-        const reviewedField =
-          role === REVIEW_ROLES.CUSTOMER ? "customerReviewed" : "supplierReviewed";
-
-        let updatedSource: any;
-        if (orderId) {
-          updatedSource = await OrderModel.findByIdAndUpdate(
-            orderId,
-            { $set: { [reviewedField]: true } },
-            { new: true, session: dbSession },
-          );
-        } else {
-          updatedSource = await BundleBookingModel.findByIdAndUpdate(
-            bundleBookingId,
-            { $set: { [reviewedField]: true } },
-            { new: true, session: dbSession },
-          );
-        }
-
-        const stats = await ReviewRepository.aggregateTargetUserStats(
-          targetUserId,
-          dbSession,
-        );
-
-        averageRating = stats[0]?.averageRating || 0;
-        totalReviews = stats[0]?.totalReviews || 0;
-
-        await UserModel.findByIdAndUpdate(
-          targetUserId,
-          { $set: { averageRating, totalReviews } },
-          { session: dbSession },
-        );
-
-        const reviewer = await UserModel.findById(actorUserId)
-          .select("firstName lastName")
-          .session(dbSession);
-
-        reviewerName = reviewer
-          ? `${reviewer.firstName} ${reviewer.lastName}`
-          : "Someone";
-
-        bothReviewed = Boolean(
-          updatedSource?.customerReviewed && updatedSource?.supplierReviewed,
-        );
-      });
-    } finally {
-      await dbSession.endSession();
+    if (![REVIEW_ROLES.CUSTOMER, REVIEW_ROLES.SUPPLIER].includes(role as any)) {
+      throw new AppError("Invalid review role", 400);
     }
 
+    const referenceId = (orderId || bundleBookingId)!;
+
+    const result = await prisma.$transaction(async (tx) => {
+      let customerId: string;
+      let supplierId: string;
+      let sessionRow: { id: string } | null = null;
+      let bothReviewed = false;
+
+      if (orderId) {
+        const order = await tx.order.findUnique({ where: { id: orderId } });
+        if (!order) throw new AppError("Order not found", 404);
+        sessionRow = await tx.jobSession.findFirst({
+          where: { orderId },
+          select: { id: true },
+        });
+        if (!sessionRow) throw new AppError("Session not found for this order", 404);
+        if (order.status !== OrderStatus.completed) {
+          throw new AppError("Reviews can only be submitted after completion", 400);
+        }
+        customerId = order.customerId;
+        supplierId = (await tx.jobSession.findUnique({
+          where: { id: sessionRow.id },
+        }))!.supplierId;
+      } else {
+        const booking = await tx.bundleBooking.findUnique({
+          where: { id: bundleBookingId! },
+        });
+        if (!booking) throw new AppError("Booking not found", 404);
+        sessionRow = await tx.jobSession.findFirst({
+          where: { bundleBookingId },
+          select: { id: true },
+        });
+        if (!sessionRow) throw new AppError("Session not found for this booking", 404);
+        if (booking.status !== BundleBookingStatus.completed) {
+          throw new AppError("Reviews can only be submitted after completion", 400);
+        }
+        customerId = booking.customerId;
+        supplierId = booking.supplierId;
+      }
+
+      const isCustomerReviewer = role === REVIEW_ROLES.CUSTOMER;
+      const isSupplierReviewer = role === REVIEW_ROLES.SUPPLIER;
+
+      if (isCustomerReviewer && actorUserId !== customerId) {
+        throw new AppError("Only the customer can submit a customer review", 403);
+      }
+      if (isSupplierReviewer && actorUserId !== supplierId) {
+        throw new AppError("Only the supplier can submit a supplier review", 403);
+      }
+
+      // Re-fetch to read current review flags inside the tx
+      const source: any = orderId
+        ? await tx.order.findUnique({ where: { id: orderId } })
+        : await tx.bundleBooking.findUnique({ where: { id: bundleBookingId! } });
+
+      if (isCustomerReviewer && source.customerReviewed) {
+        throw new AppError("Customer has already reviewed", 400);
+      }
+      if (isSupplierReviewer && source.supplierReviewed) {
+        throw new AppError("Supplier has already reviewed", 400);
+      }
+
+      const targetUserId = isCustomerReviewer ? supplierId : customerId;
+      if (actorUserId === targetUserId) {
+        throw new AppError("You cannot review yourself", 400);
+      }
+
+      const existing = await ReviewRepository.findByReviewerAndOrder(
+        actorUserId,
+        referenceId,
+        tx,
+      );
+      if (existing) throw new AppError("You have already submitted a review", 400);
+
+      const createdReview = await ReviewRepository.create(
+        {
+          reviewerId: actorUserId,
+          targetUserId,
+          orderId: orderId || referenceId,
+          sessionId: sessionRow.id,
+          rating,
+          comment,
+        },
+        tx,
+      );
+
+      const reviewedField = isCustomerReviewer ? "customerReviewed" : "supplierReviewed";
+
+      let updatedSource: any;
+      if (orderId) {
+        updatedSource = await tx.order.update({
+          where: { id: orderId },
+          data: { [reviewedField]: true },
+        });
+      } else {
+        updatedSource = await tx.bundleBooking.update({
+          where: { id: bundleBookingId! },
+          data: { [reviewedField]: true },
+        });
+      }
+
+      const stats = await ReviewRepository.aggregateTargetUserStats(targetUserId, tx);
+      const averageRating = Number(stats.averageRating) || 0;
+      const totalReviews = stats.totalReviews || 0;
+
+      await tx.user.update({
+        where: { id: targetUserId },
+        data: { averageRating, totalReviews },
+      });
+
+      const reviewer = await tx.user.findUnique({
+        where: { id: actorUserId },
+        select: { firstName: true, lastName: true },
+      });
+      const reviewerName = reviewer
+        ? `${reviewer.firstName} ${reviewer.lastName}`
+        : "Someone";
+
+      bothReviewed = Boolean(
+        updatedSource?.customerReviewed && updatedSource?.supplierReviewed,
+      );
+
+      return {
+        createdReview,
+        targetUserId,
+        reviewerName,
+        averageRating,
+        totalReviews,
+        customerId,
+        supplierId,
+        bothReviewed,
+      };
+    });
+
     await publishNotification({
-      userId: targetUserId!,
+      userId: result.targetUserId,
       type: REVIEW_NOTIFICATION_TYPES.NEW_REVIEW,
       title: "New Review Received",
-      message: `${reviewerName} left you a ${rating}-star review.`,
+      message: `${result.reviewerName} left you a ${rating}-star review.`,
       data: {
-        reviewId: createdReview._id.toString(),
+        reviewId: result.createdReview.id,
         reviewerId: actorUserId,
         orderId: orderId || null,
         bundleBookingId: bundleBookingId || null,
@@ -179,18 +175,18 @@ export class ReviewService {
       },
     });
 
-    if (bothReviewed && customerId && supplierId) {
+    if (result.bothReviewed && result.customerId && result.supplierId) {
       const refData = orderId ? { orderId } : { bundleBookingId };
       await Promise.all([
         publishNotification({
-          userId: customerId,
+          userId: result.customerId,
           type: REVIEW_NOTIFICATION_TYPES.REVIEWS_COMPLETE,
           title: "All Reviews Submitted",
           message: "Both you and the supplier have submitted your reviews.",
           data: refData,
         }),
         publishNotification({
-          userId: supplierId,
+          userId: result.supplierId,
           type: REVIEW_NOTIFICATION_TYPES.REVIEWS_COMPLETE,
           title: "All Reviews Submitted",
           message: "Both you and the customer have submitted your reviews.",
@@ -203,10 +199,10 @@ export class ReviewService {
       success: true,
       message: "Review created successfully",
       review: {
-        ...createdReview.toObject(),
+        ...result.createdReview,
         targetUserRating: {
-          averageRating,
-          totalReviews,
+          averageRating: result.averageRating,
+          totalReviews: result.totalReviews,
         },
       },
     };
@@ -214,25 +210,13 @@ export class ReviewService {
 
   static async getReviewById(reviewId: string) {
     const review = await ReviewRepository.findById(reviewId);
-
-    if (!review) {
-      throw new AppError("Review not found", 404);
-    }
-
-    return {
-      success: true,
-      review,
-    };
+    if (!review) throw new AppError("Review not found", 404);
+    return { success: true, review };
   }
 
   static async getOrderReviews(orderId: string) {
     const reviews = await ReviewRepository.findByOrderId(orderId);
-
-    return {
-      success: true,
-      count: reviews.length,
-      reviews,
-    };
+    return { success: true, count: reviews.length, reviews };
   }
 
   static async getUserReviews(userId: string, page = 1, limit = 10) {
@@ -240,14 +224,6 @@ export class ReviewService {
       ReviewRepository.findByTargetUserId(userId, page, limit),
       ReviewRepository.countByTargetUserId(userId),
     ]);
-
-    return {
-      success: true,
-      count: reviews.length,
-      total,
-      page,
-      limit,
-      reviews,
-    };
+    return { success: true, count: reviews.length, total, page, limit, reviews };
   }
 }

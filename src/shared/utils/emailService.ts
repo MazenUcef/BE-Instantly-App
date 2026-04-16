@@ -13,11 +13,35 @@ import nodemailer from 'nodemailer';
 
 const transporter = nodemailer.createTransport({
   service: 'gmail',
+  pool: true,
+  maxConnections: 3,
+  maxMessages: 100,
+  connectionTimeout: 20_000,
+  greetingTimeout: 20_000,
+  socketTimeout: 30_000,
   auth: {
     user: 'mazenafifi1999@gmail.com',
-    pass: 'ybcs slyz uawy flpm'
-  }
+    pass: 'ybcs slyz uawy flpm',
+  },
 });
+
+let warmupPromise: Promise<void> | null = null;
+
+export const warmupEmailTransport = async (): Promise<void> => {
+  if (!warmupPromise) {
+    warmupPromise = transporter
+      .verify()
+      .then(() => {
+        console.log("✅ SMTP transporter verified");
+      })
+      .catch((err) => {
+        warmupPromise = null;
+        console.error("❌ SMTP verify failed:", err);
+        throw err;
+      });
+  }
+  return warmupPromise;
+};
 
 export const sendResetPasswordEmail = async (email: string, resetToken: string) => {
   const resetUrl = `${process.env.CLIENT_URL}/reset-password?token=${resetToken}`;
@@ -146,7 +170,6 @@ export const sendWelcomeEmail = async (email: string, firstName: string) => {
 
 
 export const sendEmailOTP = async (email: string, otp: string) => {
-
   const mailOptions = {
     from: process.env.FROM_USER,
     to: email,
@@ -156,8 +179,23 @@ export const sendEmailOTP = async (email: string, otp: string) => {
       <p>Your verification code is:</p>
       <h1>${otp}</h1>
       <p>This code expires in 5 minutes.</p>
-    `
+    `,
   };
-  await transporter.sendMail(mailOptions);
 
+  try {
+    await warmupEmailTransport();
+  } catch {
+    // ignore — sendMail will raise its own error if the transport is truly broken
+  }
+
+  try {
+    const info = await transporter.sendMail(mailOptions);
+    console.log(`✉️  OTP email sent to ${email} (messageId=${info.messageId})`);
+  } catch (err) {
+    console.error(`❌ First OTP send to ${email} failed, retrying once:`, err);
+    warmupPromise = null;
+    await warmupEmailTransport();
+    const info = await transporter.sendMail(mailOptions);
+    console.log(`✉️  OTP email sent to ${email} on retry (messageId=${info.messageId})`);
+  }
 };

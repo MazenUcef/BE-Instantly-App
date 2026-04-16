@@ -22,7 +22,7 @@ const handleValidationErrors = (
 export const validateStartCall: RequestHandler[] = [
   body("sessionId")
     .notEmpty()
-    .isMongoId()
+    .isUUID()
     .withMessage("Valid sessionId is required"),
   body("type")
     .optional()
@@ -32,11 +32,11 @@ export const validateStartCall: RequestHandler[] = [
 ];
 
 export const validateCallIdParam: RequestHandler[] = [
-  param("id").isMongoId().withMessage("Invalid call id"),
+  param("id").isUUID().withMessage("Invalid call id"),
   handleValidationErrors,
 ];
 
 export const validateSessionIdParam: RequestHandler[] = [
-  param("sessionId").isMongoId().withMessage("Invalid session id"),
+  param("sessionId").isUUID().withMessage("Invalid session id"),
   handleValidationErrors,
 ];

@@ -1,21 +1,25 @@
+import prisma from "../../../shared/config/prisma";
 import { getIO, socketEvents, socketRooms } from "../../../shared/config/socket";
 import { publishNotification } from "../../notification/notification.publisher";
 import { buildSupplierOrderPayload } from "../../../shared/utils/buildSupplierOrderPayload";
-import UserModel from "../../auth/models/User.model";
-import orderModel from "../../order/models/Order.model";
 import { OFFER_NOTIFICATION_TYPES } from "../../../shared/constants/offer.constants";
 import { OfferRepository } from "../repository/offer.repository";
 
 export class OfferEventService {
   static async buildOfferPayload(offer: any) {
-    const supplier = await UserModel.findById(offer.supplierId).select(
-      "-password -refreshToken -biometrics",
-    );
+    const supplier = await prisma.user.findUnique({
+      where: { id: offer.supplierId },
+      select: {
+        id: true,
+        firstName: true,
+        lastName: true,
+        profilePicture: true,
+        averageRating: true,
+        totalReviews: true,
+      },
+    });
 
-    return {
-      ...offer.toObject(),
-      supplier: supplier || null,
-    };
+    return { ...offer, supplier: supplier || null };
   }
 
   static async emitOfferCreatedToCustomer(input: {
@@ -70,12 +74,9 @@ export class OfferEventService {
     const offers = await OfferRepository.findPendingOffersBySupplier(supplierId);
 
     const enriched = await Promise.all(
-      offers.map(async (offer: any) => {
-        const order = await orderModel.findById(offer.orderId).lean();
-        return {
-          ...offer.toObject(),
-          order: order || null,
-        };
+      offers.map(async (offer) => {
+        const order = await prisma.order.findUnique({ where: { id: offer.orderId } });
+        return { ...offer, order: order || null };
       }),
     );
 
@@ -111,6 +112,27 @@ export class OfferEventService {
         amount: input.amount,
         estimatedDuration: input.estimatedDuration ?? null,
         timeToStart: input.timeToStart ?? null,
+      },
+    });
+  }
+
+  static async notifyCustomerOfferUpdated(input: {
+    customerId: string;
+    orderId: string;
+    offerId: string;
+    supplierId: string;
+    amount: number;
+  }) {
+    await publishNotification({
+      userId: input.customerId,
+      type: OFFER_NOTIFICATION_TYPES.OFFER_UPDATED,
+      title: "Offer Updated",
+      message: `A supplier updated their offer for your order #${input.orderId}.`,
+      data: {
+        offerId: input.offerId,
+        orderId: input.orderId,
+        supplierId: input.supplierId,
+        amount: input.amount,
       },
     });
   }
@@ -158,8 +180,8 @@ export class OfferEventService {
     const payload = await buildSupplierOrderPayload(orderId);
     if (!payload) return;
 
-    const categoryId = payload.category?._id?.toString?.();
-    const governmentId = payload.government?._id?.toString?.();
+    const categoryId = (payload.category as any)?.id;
+    const governmentId = (payload.government as any)?.id;
     if (!categoryId || !governmentId) return;
 
     const io = getIO();
