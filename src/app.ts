@@ -20,6 +20,7 @@ import bundleRoutes from './modules/bundle/routes/bundle.routes';
 import bundleBookingRoutes from './modules/bundleBooking/routes/bundleBooking.routes';
 import callRoutes from './modules/call/routes/call.routes';
 import governmentRoutes from './modules/government/routes/Government.routes'
+import addressRoutes from './modules/address/routes/address.routes';
 import { errorHandler } from './shared/middlewares/errorHandler';
 
 dotenv.config();
@@ -75,6 +76,7 @@ app.use("/api/availability", availabilityRoutes);
 app.use("/api/bundles", bundleRoutes);
 app.use("/api/bundle-bookings", bundleBookingRoutes);
 app.use("/api/calls", callRoutes);
+app.use("/api/addresses", addressRoutes);
 
 app.use(errorHandler);
 

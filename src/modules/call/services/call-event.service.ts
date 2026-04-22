@@ -165,15 +165,28 @@ export class CallEventService {
   }
 
   static async notifyMissed(call: any) {
-    await publishNotification({
-      userId: call.callerId,
-      type: CALL_NOTIFICATION_TYPES.MISSED_CALL,
-      title: "Missed call",
-      message: "Your call was missed.",
-      data: {
-        callId: call.id,
-        sessionId: call.sessionId,
-      },
-    });
+    await Promise.all([
+      publishNotification({
+        userId: call.callerId,
+        type: CALL_NOTIFICATION_TYPES.MISSED_CALL,
+        title: "Missed call",
+        message: "Your call was not answered.",
+        data: {
+          callId: call.id,
+          sessionId: call.sessionId,
+        },
+      }),
+      publishNotification({
+        userId: call.receiverId,
+        type: CALL_NOTIFICATION_TYPES.MISSED_CALL,
+        title: "Missed call",
+        message: "You missed a call.",
+        data: {
+          callId: call.id,
+          sessionId: call.sessionId,
+          callerId: call.callerId,
+        },
+      }),
+    ]);
   }
 }

@@ -10,7 +10,7 @@ router.get("/", getAllGovernments);
 router.get(
   "/admin/all",
   authenticate,
-  // authorize("admin"),
+  authorize("admin"),
   getAllGovernmentsAdmin,
 );
 
@@ -19,7 +19,7 @@ router.get("/:id", validateGetGovernmentById, getGovernmentById);
 router.post(
   "/",
   authenticate,
-  // authorize("admin"),
+  authorize("admin"),
   validateCreateGovernment,
   createGovernment,
 );

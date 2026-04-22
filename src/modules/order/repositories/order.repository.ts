@@ -11,6 +11,16 @@ const userSelect = {
   phoneNumber: true,
   profilePicture: true,
   address: true,
+  role: true,
+  categoryId: true,
+  isEmailVerified: true,
+  isPhoneVerified: true,
+  isProfileComplete: true,
+  averageRating: true,
+  totalReviews: true,
+  jobTitles: true,
+  createdAt: true,
+  updatedAt: true,
 } as const;
 
 const taxonomySelect = { id: true, name: true, nameAr: true } as const;

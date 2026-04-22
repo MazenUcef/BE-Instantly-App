@@ -4,6 +4,7 @@ import { AppError } from "../../../shared/middlewares/errorHandler";
 import { ChatRepository } from "../repositories/chat.repository";
 import { getIO, socketEvents, socketRooms } from "../../../shared/config/socket";
 import { CHAT_SESSION_BLOCKED_STATUSES } from "../../../shared/constants/chat.constants";
+import { publishNotification } from "../../notification/notification.publisher";
 
 const normalizePaginatedMessages = (messages: any[]) => [...messages].reverse();
 
@@ -67,6 +68,19 @@ export class ChatService {
     io.to(socketRooms.chat(sessionId)).emit(socketEvents.MESSAGE_NEW, payload);
     io.to(socketRooms.user(receiverId)).emit(socketEvents.MESSAGE_NEW, payload);
     io.to(socketRooms.user(senderId)).emit(socketEvents.MESSAGE_NEW, payload);
+
+    const sender = await prisma.user.findUnique({
+      where: { id: senderId },
+      select: { firstName: true },
+    });
+
+    await publishNotification({
+      userId: receiverId,
+      type: "NEW_MESSAGE",
+      title: "New Message",
+      message: `${sender?.firstName || "Someone"} sent you a message.`,
+      data: { sessionId, messageId: createdMessage.id, senderId },
+    });
 
     return {
       success: true,

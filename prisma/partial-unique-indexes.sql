@@ -44,6 +44,15 @@ CREATE UNIQUE INDEX IF NOT EXISTS "uniq_active_call_per_session"
   ON "CallSession" ("sessionId")
   WHERE status IN ('initiated', 'ringing', 'accepted');
 
+-- SavedAddress: a user can have at most one Home and one Work saved address.
+CREATE UNIQUE INDEX IF NOT EXISTS "uniq_saved_address_single_home_per_user"
+  ON "SavedAddress" ("userId")
+  WHERE type = 'home';
+
+CREATE UNIQUE INDEX IF NOT EXISTS "uniq_saved_address_single_work_per_user"
+  ON "SavedAddress" ("userId")
+  WHERE type = 'work';
+
 -- CHECK constraint: a JobSession must belong to exactly one parent
 -- (ad-hoc order+offer) OR (bundle booking), not both, not neither.
 ALTER TABLE "JobSession"
@@ -53,3 +62,4 @@ ALTER TABLE "JobSession"
     OR
     ("orderId" IS NULL AND "offerId" IS NULL AND "bundleBookingId" IS NOT NULL)
   );
+ 

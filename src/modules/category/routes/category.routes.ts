@@ -19,7 +19,7 @@ const router = Router();
 router.post(
   "/",
   authenticate,
-  // authorize("admin"),
+  authorize("admin"),
   validateCreateCategory,
   createCategory,
 );
