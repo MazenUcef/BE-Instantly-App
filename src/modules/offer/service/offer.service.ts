@@ -37,18 +37,11 @@ import { parseTimeToMinutes } from "../../../shared/utils/calendar";
 
 type Tx = Prisma.TransactionClient;
 
-const DAILY_START_HOUR = 9;
 const DAILY_DURATION_MINUTES = 8 * 60;
 
 const BUNDLE_ACTIVE_ENUM = BUNDLE_BOOKING_ACTIVE_SLOT_STATUSES.map(
   (s) => s as BundleBookingStatus,
 );
-
-function normalizeDailyStart(input: Date | string): Date {
-  const d = new Date(input);
-  d.setUTCHours(DAILY_START_HOUR, 0, 0, 0);
-  return d;
-}
 
 function resolveOfferSchedule(
   order: {
@@ -78,9 +71,7 @@ function resolveOfferSchedule(
       );
     }
     return {
-      timeToStart: isImmediate
-        ? new Date()
-        : normalizeDailyStart(effectiveTimeToStart),
+      timeToStart: isImmediate ? new Date() : new Date(effectiveTimeToStart),
       estimatedDuration: DAILY_DURATION_MINUTES,
       expectedDays: input.expectedDays,
     };
@@ -975,9 +966,7 @@ export class OfferService {
 
         const isDailyOrder = order.orderType === ORDER_TYPE.DAILY;
         const directTimeToStart = isDirectScheduled
-          ? (isDailyOrder
-              ? normalizeDailyStart(order.timeToStart!)
-              : new Date(order.timeToStart!))
+          ? new Date(order.timeToStart!)
           : new Date();
         const directEstimatedDuration = isDailyOrder
           ? DAILY_DURATION_MINUTES

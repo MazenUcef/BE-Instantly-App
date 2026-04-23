@@ -108,10 +108,12 @@ export class OrderRepository {
   }
 
   static findDueScheduledOrders(tx?: Tx) {
+    const now = new Date();
     return (tx ?? prisma).order.findMany({
       where: {
         status: OrderStatus.scheduled,
-        scheduledAt: { lte: new Date() },
+        scheduledAt: { lte: now },
+        timeToStart: { lte: now },
       },
     });
   }
