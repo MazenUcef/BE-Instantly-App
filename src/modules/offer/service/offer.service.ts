@@ -9,6 +9,7 @@ import {
 import { AppError } from "../../../shared/middlewares/errorHandler";
 import { OfferEventService } from "./offer-event.service";
 import {
+  ORDER_MODE,
   ORDER_STATUS,
   ORDER_TYPE,
 } from "../../../shared/constants/order.constants";
@@ -50,15 +51,24 @@ function normalizeDailyStart(input: Date | string): Date {
 }
 
 function resolveOfferSchedule(
-  order: { orderType: string; timeToStart?: Date | string | null },
+  order: {
+    orderType: string;
+    orderMode: string;
+    timeToStart?: Date | string | null;
+  },
   input: {
     timeToStart?: Date | string | null;
     estimatedDuration?: number | null;
     expectedDays?: number | null;
   },
 ): { timeToStart: Date; estimatedDuration: number; expectedDays: number | null } {
+  const isImmediate = order.orderMode === ORDER_MODE.IMMEDIATE;
+  const effectiveTimeToStart = isImmediate
+    ? new Date()
+    : input.timeToStart ?? order.timeToStart ?? null;
+
   if (order.orderType === ORDER_TYPE.DAILY) {
-    if (!input.timeToStart) {
+    if (!effectiveTimeToStart) {
       throw new AppError("timeToStart is required for daily orders", 400);
     }
     if (!input.expectedDays || input.expectedDays < 1) {
@@ -68,13 +78,15 @@ function resolveOfferSchedule(
       );
     }
     return {
-      timeToStart: normalizeDailyStart(input.timeToStart),
+      timeToStart: isImmediate
+        ? new Date()
+        : normalizeDailyStart(effectiveTimeToStart),
       estimatedDuration: DAILY_DURATION_MINUTES,
       expectedDays: input.expectedDays,
     };
   }
 
-  if (!input.timeToStart) {
+  if (!effectiveTimeToStart) {
     throw new AppError("timeToStart is required for contract orders", 400);
   }
   if (!input.estimatedDuration || input.estimatedDuration < 1) {
@@ -85,7 +97,7 @@ function resolveOfferSchedule(
   }
 
   return {
-    timeToStart: new Date(input.timeToStart),
+    timeToStart: new Date(effectiveTimeToStart),
     estimatedDuration: input.estimatedDuration,
     expectedDays: null,
   };
@@ -448,14 +460,19 @@ export class OfferService {
 
         await OfferRepository.rejectOtherOffersForOrder(order.id, offer.id, tx);
 
-        const offerStartTime: Date | null = offer.timeToStart
-          ? new Date(offer.timeToStart)
-          : null;
-        const isScheduled = offerStartTime && offerStartTime > new Date();
+        const isScheduled = order.orderMode === ORDER_MODE.SCHEDULED;
+        const offerStartTime: Date | null =
+          isScheduled && offer.timeToStart ? new Date(offer.timeToStart) : null;
 
         let sessionDoc: any = null;
 
-        if (isScheduled && offerStartTime) {
+        if (isScheduled) {
+          if (!offerStartTime) {
+            throw new AppError(
+              "Offer is missing timeToStart for a scheduled order",
+              400,
+            );
+          }
           const duration = offer.estimatedDuration ?? 60;
           const [supplierConflict, customerConflict] = await Promise.all([
             this.checkSupplierTimeConflict(
@@ -947,14 +964,21 @@ export class OfferService {
         if (order.customerId === supplierId) {
           throw new AppError("You cannot accept your own order", 400);
         }
-        if (!order.timeToStart) {
-          throw new AppError("Order is missing timeToStart", 400);
+
+        const isDirectScheduled = order.orderMode === ORDER_MODE.SCHEDULED;
+        if (isDirectScheduled && !order.timeToStart) {
+          throw new AppError(
+            "Scheduled order is missing timeToStart",
+            400,
+          );
         }
 
         const isDailyOrder = order.orderType === ORDER_TYPE.DAILY;
-        const directTimeToStart = isDailyOrder
-          ? normalizeDailyStart(order.timeToStart)
-          : new Date(order.timeToStart);
+        const directTimeToStart = isDirectScheduled
+          ? (isDailyOrder
+              ? normalizeDailyStart(order.timeToStart!)
+              : new Date(order.timeToStart!))
+          : new Date();
         const directEstimatedDuration = isDailyOrder
           ? DAILY_DURATION_MINUTES
           : order.estimatedDuration!;
@@ -984,7 +1008,6 @@ export class OfferService {
         );
         await OfferRepository.rejectOtherOffersForOrder(orderId, offer.id, tx);
 
-        const isDirectScheduled = directTimeToStart > new Date();
         let sessionDoc: any = null;
 
         if (isDirectScheduled) {

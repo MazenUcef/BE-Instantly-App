@@ -15,6 +15,13 @@ export const ORDER_TYPE = {
 
 export type OrderType = (typeof ORDER_TYPE)[keyof typeof ORDER_TYPE];
 
+export const ORDER_MODE = {
+  IMMEDIATE: "immediate",
+  SCHEDULED: "scheduled",
+} as const;
+
+export type OrderMode = (typeof ORDER_MODE)[keyof typeof ORDER_MODE];
+
 export const ORDER_CANCELLED_BY = {
   CUSTOMER: "customer",
   SUPPLIER: "supplier",

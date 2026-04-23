@@ -36,6 +36,11 @@ enum OrderType {
   daily
 }
 
+enum OrderMode {
+  immediate
+  scheduled
+}
+
 enum OrderCancelledBy {
   customer
   supplier
@@ -259,6 +264,7 @@ model Order {
   description        String
   requestedPrice     Decimal           @db.Decimal(12, 2)
   orderType          OrderType         @default(daily)
+  orderMode          OrderMode         @default(scheduled)
   selectedWorkflow   String
   expectedDays       Int?
   status             OrderStatus       @default(pending)

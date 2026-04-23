@@ -11,7 +11,9 @@ import { OrderEventService } from "./order-event.service";
 import { buildSupplierOrderPayload } from "../../../shared/utils/buildSupplierOrderPayload";
 import {
   ORDER_CANCELLED_BY,
+  ORDER_MODE,
   ORDER_STATUS,
+  OrderMode,
 } from "../../../shared/constants/order.constants";
 import { getIO, socketEvents, socketRooms } from "../../../shared/config/socket";
 import { SESSION_CANCELLED_BY } from "../../../shared/constants/session.constants";
@@ -93,6 +95,7 @@ export class OrderService {
     timeToStart?: string | Date | null;
     jobTitle: string;
     orderType: "contract" | "daily";
+    orderMode: OrderMode;
     selectedWorkflow: string;
     expectedDays?: number | null;
     estimatedDuration?: number | null;
@@ -110,12 +113,23 @@ export class OrderService {
       timeToStart,
       jobTitle,
       orderType,
+      orderMode,
       selectedWorkflow,
       expectedDays,
       estimatedDuration,
       imageFiles = [],
       docFiles = [],
     } = input;
+
+    if (orderMode !== ORDER_MODE.IMMEDIATE && orderMode !== ORDER_MODE.SCHEDULED) {
+      throw new AppError("orderMode must be 'immediate' or 'scheduled'", 400);
+    }
+
+    const normalizedTimeToStart =
+      orderMode === ORDER_MODE.SCHEDULED ? (timeToStart ?? null) : null;
+    if (orderMode === ORDER_MODE.SCHEDULED && !normalizedTimeToStart) {
+      throw new AppError("timeToStart is required for scheduled orders", 400);
+    }
 
     const normalizedExpectedDays =
       orderType === "daily" ? expectedDays ?? null : null;
@@ -167,8 +181,9 @@ export class OrderService {
           governmentId,
           jobTitle,
           requestedPrice,
-          timeToStart: timeToStart || null,
+          timeToStart: normalizedTimeToStart,
           orderType,
+          orderMode,
           selectedWorkflow,
           expectedDays: normalizedExpectedDays,
           estimatedDuration: normalizedEstimatedDuration,

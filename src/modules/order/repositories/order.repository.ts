@@ -1,4 +1,4 @@
-import { OrderStatus, OrderType, Prisma } from "@prisma/client";
+import { OrderMode, OrderStatus, OrderType, Prisma } from "@prisma/client";
 import prisma from "../../../shared/config/prisma";
 
 type Tx = Prisma.TransactionClient;
@@ -38,6 +38,7 @@ export class OrderRepository {
       description: string;
       requestedPrice: number;
       orderType: OrderType;
+      orderMode: OrderMode;
       selectedWorkflow: string;
       expectedDays?: number | null;
       estimatedDuration?: number | null;
@@ -59,6 +60,7 @@ export class OrderRepository {
         description: data.description,
         requestedPrice: new Prisma.Decimal(data.requestedPrice),
         orderType: data.orderType,
+        orderMode: data.orderMode,
         selectedWorkflow: data.selectedWorkflow,
         expectedDays: data.expectedDays ?? null,
         estimatedDuration: data.estimatedDuration ?? null,

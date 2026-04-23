@@ -16,6 +16,7 @@ export const createOrder = async (req: any, res: Response) => {
     timeToStart: req.body.timeToStart,
     jobTitle: req.body.jobTitle,
     orderType: req.body.orderType,
+    orderMode: req.body.orderMode,
     selectedWorkflow: req.body.selectedWorkflow,
     expectedDays:
       req.body.expectedDays !== undefined && req.body.expectedDays !== ""

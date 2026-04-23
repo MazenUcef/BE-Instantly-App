@@ -1,6 +1,6 @@
 import { Request, Response, NextFunction, RequestHandler } from "express";
 import { body, param, query, validationResult } from "express-validator";
-import { ORDER_TYPE } from "../../../shared/constants/order.constants";
+import { ORDER_MODE, ORDER_TYPE } from "../../../shared/constants/order.constants";
 import { uploadWithFiles } from "../../../shared/config/multer";
 
 const handleValidationErrors = (
@@ -36,6 +36,12 @@ export const validateCreateOrder: RequestHandler[] = [
     .notEmpty()
     .isIn(Object.values(ORDER_TYPE))
     .withMessage("Invalid orderType"),
+  body("orderMode")
+    .notEmpty()
+    .withMessage("orderMode is required")
+    .bail()
+    .isIn(Object.values(ORDER_MODE))
+    .withMessage("orderMode must be 'immediate' or 'scheduled'"),
   body("selectedWorkflow")
     .notEmpty()
     .isString()
@@ -45,18 +51,24 @@ export const validateCreateOrder: RequestHandler[] = [
     .isLength({ min: 2, max: 50 })
     .withMessage("selectedWorkflow must be between 2 and 50 characters"),
   body("timeToStart")
+    .if(body("orderMode").equals(ORDER_MODE.SCHEDULED))
     .notEmpty()
-    .withMessage("timeToStart is required")
+    .withMessage("timeToStart is required for scheduled orders")
     .bail()
     .isISO8601()
     .withMessage("timeToStart must be a valid ISO date")
     .bail()
     .custom((value) => {
-      if (new Date(value) <= new Date()) {
-        throw new Error("timeToStart must be in the future");
+      if (new Date(value).getTime() - Date.now() < 60_000) {
+        throw new Error("timeToStart must be at least 1 minute in the future");
       }
       return true;
     }),
+  body("timeToStart")
+    .if(body("orderMode").equals(ORDER_MODE.IMMEDIATE))
+    .optional()
+    .isISO8601()
+    .withMessage("timeToStart must be a valid ISO date"),
   body("expectedDays")
     .if(body("orderType").equals(ORDER_TYPE.DAILY))
     .notEmpty()
